@@ -144,16 +144,16 @@ export const SelectedStationsProvider: React.FC<{
   }, [providerId, selectedStations])
 
   // Track state changes
-  useEffect(() => {
-    console.group(`🔄 SelectedStationsProvider (${providerId}) - State Updated`)
-    console.log('Current stations:', selectedStations)
-    console.log('Station count:', selectedStations.length)
-    console.log(
-      'Station names:',
-      selectedStations.map((s) => s.name)
-    )
-    console.groupEnd()
-  }, [selectedStations, providerId])
+  // useEffect(() => {
+  //   console.group(`🔄 SelectedStationsProvider (${providerId}) - State Updated`)
+  //   console.log('Current stations:', selectedStations)
+  //   console.log('Station count:', selectedStations.length)
+  //   console.log(
+  //     'Station names:',
+  //     selectedStations.map((s) => s.name)
+  //   )
+  //   console.groupEnd()
+  // }, [selectedStations, providerId])
 
   const toggleStation = (station: Station) => {
     console.group(`🔧 toggleStation called in provider (${providerId})`)

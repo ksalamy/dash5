@@ -16,9 +16,12 @@ import { Allotment, LayoutPriority } from 'allotment'
 import { useGoogleMaps } from '../lib/useGoogleMaps'
 import { VPosDetail } from '@mbari/api-client'
 import 'allotment/dist/style.css'
-import toast from 'react-hot-toast'
+import toast, { useToaster } from 'react-hot-toast'
 import { StationsListModal } from '../components/StationsListModal'
 import { useSelectedStations } from '../components/SelectedStationContext'
+import type { MapProps } from '@mbari/react-ui/dist/Map/Map'
+// import { CustomMarker } from '../components/CustomMarker'
+import { useMap } from 'react-leaflet'
 
 // This is a tricky workaround to prevent leaflet from crashing next.js
 // SSR. If we don't do this, the leaflet map will be loaded server side
@@ -34,14 +37,20 @@ const VehiclePath = dynamic(() => import('../components/VehiclePath'), {
 const StationMarker = dynamic(() => import('../components/StationMarker'), {
   ssr: false,
 })
+
+const DraggableMarker = dynamic(() => import('../components/DraggableMarker'), {
+  ssr: false,
+})
+
+const CustomMarkerSet = dynamic(() => import('../components/CustomMarkerSet'), {
+  ssr: false,
+})
+
+const ClickableMapPoint = dynamic(
+  () => import('../components/ClickableMapPoint'),
+  { ssr: false }
+)
 // TODO: Set up Draggable Marker and ClickableMapPoint
-// const DraggableMarker = dynamic(() => import('../components/DraggableMarker'), {
-//   ssr: false,
-// })
-// const ClickableMapPoint = dynamic(
-//   () => import('../components/ClickableMapPoint'),
-//   { ssr: false }
-// )
 
 const styles = {
   content: 'flex flex-shrink flex-grow flex-row overflow-hidden',
@@ -50,49 +59,176 @@ const styles = {
   secondary:
     'flex w-full flex-shrink-0 flex-col bg-white border-t-2 border-secondary-300/60',
 }
+type CustomMapProps = MapProps &
+  React.RefAttributes<L.Map> & {
+    isAddingMarkers?: boolean
+    onToggleMarkerMode?: () => void
+  }
 
-const CustomMarkerSet: React.FC = () => {
-  const [markers, setMarkers] = React.useState<
-    { lat: number; lng: number; label: string }[]
-  >([])
-  const [markerIndex, setMarkerIndex] = React.useState(0)
-  const handleNewMarker = useCallback(
-    (lat: number, lng: number) => {
-      setMarkers([
-        ...markers,
-        { lat, lng, label: `Marker ${markers.length + 1}` },
-      ])
-      setMarkerIndex((prevIndex) => prevIndex + 1)
-    },
-    [markers, setMarkers]
-  )
-  return null
-  // TO-DO: Implement DraggableMarker and ClickableMapPoint
-  // return (
-  //   <>
+// interface CustomMarkerSetProps {
+//   isAddingMarkers: boolean
+//   setIsAddingMarkers: React.Dispatch<React.SetStateAction<boolean>>
+// }
 
-  /* <ClickableMapPoint onClick={handleNewMarker} />
-      {markers.map((marker, index) => (
-        <DraggableMarker
-          lat={marker.lat}
-          lng={marker.lng}
-          index={index}
-          key={[marker.label, index].join('-')}
-          draggable
-          onDragEnd={(index, latlng) => {
-            setMarkers(
-              markers.map((m, i) =>
-                i === index ? { ...m, lat: latlng.lat, lng: latlng.lng } : m
-              )
-            )
-          }}
-        />
-      ))} */
-}
+// interface MarkerData {
+//   id: number
+//   lat: number
+//   lng: number
+//   index: number
+//   label: string
+// }
 
+// interface ClickablePointData {
+//   id: number
+//   lat: number
+//   lng: number
+// }
+
+// const CustomMarkerSet: React.FC<CustomMarkerSetProps> = ({
+//   isAddingMarkers,
+//   setIsAddingMarkers,
+// }) => {
+//   console.log('CustomMarkerSet rendered', { isAddingMarkers })
+//   const [clickablePoints, setClickablePoints] = useState<ClickablePointData[]>(
+//     []
+//   )
+//   const [selectedMarkerId, setSelectedMarkerId] = useState<number | null>(null)
+//   const [markers, setMarkers] = useState<MarkerData[]>([])
+//   console.log('Markers:', markers)
+//   console.log('Clickable points:', clickablePoints)
+//   // Get access to the Leaflet map instance
+//   const map = useMap()
+
+//   const handleAddMarker = useCallback(
+//     (latlng: { lat: number; lng: number }) => {
+//       const newMarkerId = Date.now() + Math.random()
+//       setMarkers((prev) => [
+//         ...prev,
+//         {
+//           id: newMarkerId,
+//           lat: latlng.lat,
+//           lng: latlng.lng,
+//           index: prev.length % 19,
+//           label: `Marker ${prev.length + 1}`,
+//         },
+//       ])
+//       return newMarkerId
+//     },
+//     []
+//   )
+//   const handleAddClickablePoint = useCallback(
+//     (latlng: { lat: number; lng: number }) => {
+//       setClickablePoints((prev) => [
+//         ...prev,
+//         {
+//           id: Date.now() + Math.random(),
+//           lat: latlng.lat,
+//           lng: latlng.lng,
+//         },
+//       ])
+//     },
+//     []
+//   )
+
+//   const handleMarkerDragEnd = useCallback(
+//     (id: number, latlng: { lat: number; lng: number }) => {
+//       setMarkers((prev) =>
+//         prev.map((marker) =>
+//           marker.id === id
+//             ? { ...marker, lat: latlng.lat, lng: latlng.lng }
+//             : marker
+//         )
+//       )
+//       toast.success(
+//         `Marker moved to (${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)})`
+//       )
+//     },
+//     []
+//   )
+
+//   const handleMarkerClick = useCallback((id: number) => {
+//     setSelectedMarkerId(id)
+//   }, [])
+
+//   const handleEditMarkerLabel = useCallback((id: number, newLabel: string) => {
+//     setMarkers((prev) =>
+//       prev.map((marker) =>
+//         marker.id === id ? { ...marker, label: newLabel } : marker
+//       )
+//     )
+//     toast.success(`Marker renamed to "${newLabel}"`)
+//   }, [])
+
+//   const handleDeleteMarker = useCallback((id: number) => {
+//     setMarkers((prev) => prev.filter((marker) => marker.id !== id))
+//     toast.success('Marker deleted')
+//     setSelectedMarkerId(null)
+//   }, [])
+
+//   useEffect(() => {
+//     if (!map) return
+
+//     const handleMapClick = (e: L.LeafletMouseEvent) => {
+//       if (isAddingMarkers) {
+//         const newMarkerId = handleAddMarker({
+//           lat: e.latlng.lat,
+//           lng: e.latlng.lng,
+//         })
+//         setSelectedMarkerId(newMarkerId)
+//         toast.success(
+//           `Marker added at (${e.latlng.lat.toFixed(5)}, ${e.latlng.lng.toFixed(
+//             5
+//           )})`
+//         )
+//       }
+//     }
+
+//     if (isAddingMarkers) {
+//       map.on('click', handleMapClick)
+//       map.getContainer().style.cursor = 'crosshair'
+//       toast('Click on the map to add markers')
+//     } else {
+//       map.off('click', handleMapClick)
+//       map.getContainer().style.cursor = ''
+//     }
+
+//     return () => {
+//       map.off('click', handleMapClick)
+//       map.getContainer().style.cursor = ''
+//     }
+//   }, [isAddingMarkers, handleAddMarker, map])
+
+//   return (
+//     <>
+//       {markers.map((marker) => (
+//         <DraggableMarker
+//           key={marker.id}
+//           id={marker.id}
+//           position={[marker.lat, marker.lng]}
+//           label={marker.label}
+//           index={marker.index}
+//           isSelected={selectedMarkerId === marker.id}
+//           onDragEnd={(pos) =>
+//             handleMarkerDragEnd(marker.id, { lat: pos[0], lng: pos[1] })
+//           }
+//           onClick={() => handleMarkerClick(marker.id)}
+//           onEdit={(newLabel) => handleEditMarkerLabel(marker.id, newLabel)}
+//           onDelete={() => handleDeleteMarker(marker.id)}
+//         />
+//       ))}
+//     </>
+//   )
+// }
+
+// export default CustomMarkerSet
+
+////////////////   OVERVIEWMAP   //////////////////////
+//////////////////////////////////////////////////////
 const OverViewMap: React.FC<{
   trackedVehicles: string[]
 }> = ({ trackedVehicles }) => {
+  // Add mapRef to store the Leaflet map instance
+  const mapRef = useRef<L.Map | null>(null)
   const { handleDepthRequest } = useGoogleElevator()
   const [center, setCenter] = useState<undefined | [number, number]>()
   const [centerZoom, setCenterZoom] = useState<number | undefined>(undefined)
@@ -103,11 +239,18 @@ const OverViewMap: React.FC<{
   const [showStations, setShowStations] = useState(false)
   const [viewMode, setViewMode] = useState<'center' | 'bounds' | null>(null)
   const { selectedStations } = useSelectedStations()
+  const [isAddingMarkers, setIsAddingMarkers] = useState(false)
+
+  // Debugging: Log trackedVehicles
+  console.log('Tracked vehicles:', trackedVehicles)
+
+  // Debugging: Ensure trackedVehicles contains unique values
+  const uniqueTrackedVehicles = Array.from(new Set(trackedVehicles))
+  console.log('Unique tracked vehicles:', uniqueTrackedVehicles)
 
   // Store all vehicle positions for bounds calculation
   const vehiclePositions = useRef<Array<[number, number]>>([])
 
-  // Add at the start of the component:
   useEffect(() => {
     // Reset positions when component unmounts or tracked vehicles change
     return () => {
@@ -130,14 +273,12 @@ const OverViewMap: React.FC<{
     [latestGPS, setLatestGPS]
   )
 
-  // Calculate bounds from all tracked vehicle positions
   const calculateBounds = useCallback(() => {
     if (vehiclePositions.current.length === 0) {
-      console.warn('No vehicle positions available for bounds calculation')
+      // console.warn('No vehicle positions available for bounds calculation')
       return
     }
 
-    // Find min/max lat/lon
     let minLat = 90,
       maxLat = -90,
       minLng = 180,
@@ -150,7 +291,6 @@ const OverViewMap: React.FC<{
       maxLng = Math.max(maxLng, pos[1])
     })
 
-    // Add padding (0.1 degrees)
     const padding = 0.1
     const newBounds: [[number, number], [number, number]] = [
       [minLat - padding, minLng - padding],
@@ -159,76 +299,99 @@ const OverViewMap: React.FC<{
     setBounds(newBounds)
   }, [])
 
-  // Handler for centering on latest position
   const handleCoordinateRequest = useCallback(() => {
     if (latestGPS) {
       setCenter([latestGPS.latitude, latestGPS.longitude])
       setCenterZoom(15)
       setBounds(undefined)
-      // Set the view mode to force a re-render even if coordinates haven't changed
       setViewMode('center')
     }
   }, [latestGPS])
 
-  // Handler for fitting bounds to all vehicles
   const handleFitBoundsRequest = useCallback(() => {
     calculateBounds()
-    setCenter(undefined) // Clear center when using bounds
-    // Set the view mode to force a re-render
+    setCenter(undefined)
     setViewMode('bounds')
   }, [calculateBounds])
+
+  const handleMarkersRequest = useCallback(() => {
+    console.log('Markers requested')
+  }, [])
 
   const handleStationsRequest = useCallback(() => {
     setShowStations(true)
   }, [setShowStations])
 
-  // Add this handler to close the modal
   const handleCloseStations = useCallback(() => {
     setShowStations(false)
   }, [setShowStations])
 
+  const handleToggleMarkerMode = useCallback(() => {
+    setIsAddingMarkers((prev) => {
+      const newValue = !prev
+      toast(`Marker mode ${newValue ? 'enabled' : 'disabled'}`)
+      return newValue
+    })
+  }, [])
+
+  useEffect(() => {
+    console.log('mapRef.current in OverViewMap:', mapRef.current)
+  }, [mapRef])
+
   return (
-    <>
-      {showStations ? (
-        <StationsListModal onClose={handleCloseStations} />
-      ) : null}
+    console.log('Rendering Map with children'),
+    (
+      <>
+        {showStations ? (
+          <StationsListModal onClose={handleCloseStations} />
+        ) : null}
 
-      <Map
-        className="h-full w-full"
-        onRequestDepth={handleDepthRequest}
-        center={center}
-        centerZoom={centerZoom}
-        fitBounds={bounds}
-        viewMode={viewMode}
-        onRequestCoordinate={handleCoordinateRequest}
-        onRequestFitBounds={handleFitBoundsRequest}
-        onRequestStations={handleStationsRequest}
-      >
-        {trackedVehicles.map((name) => (
-          <VehiclePath
-            name={name}
-            key={`path${name}`}
-            onGPSFix={handleGPSFix}
-            grouped
-          />
-        ))}
-        {selectedStations.map((station) => {
-          const lng = station.geojson?.geometry?.coordinates[0]
-          const lat = station.geojson?.geometry?.coordinates[1]
-
-          if (!lng || !lat) return null
-          return (
-            <StationMarker
-              key={station.name}
-              name={station.name}
-              lat={lat}
-              lng={lng}
+        <Map
+          className="h-full w-full"
+          onRequestDepth={handleDepthRequest}
+          center={center}
+          centerZoom={centerZoom}
+          fitBounds={bounds}
+          viewMode={viewMode}
+          onRequestCoordinate={handleCoordinateRequest}
+          onRequestFitBounds={handleFitBoundsRequest}
+          onRequestStations={handleStationsRequest}
+          onRequestMarkers={handleMarkersRequest}
+          isAddingMarkers={isAddingMarkers}
+          onToggleMarkerMode={handleToggleMarkerMode}
+        >
+          {uniqueTrackedVehicles.map((name, index) => (
+            <VehiclePath
+              name={name}
+              key={`path-${name}-${index}`}
+              onGPSFix={handleGPSFix}
+              grouped
             />
-          )
-        })}
-        <CustomMarkerSet />
-      </Map>
-    </>
+          ))}
+          {selectedStations.map((station) => {
+            const lng = station.geojson?.geometry?.coordinates[0]
+            const lat = station.geojson?.geometry?.coordinates[1]
+
+            if (!lng || !lat) {
+              return null
+            }
+
+            return (
+              <StationMarker
+                key={station.name}
+                name={station.name}
+                lat={lat}
+                lng={lng}
+              />
+            )
+          })}
+          <CustomMarkerSet
+            isAddingMarkers={isAddingMarkers}
+            setIsAddingMarkers={setIsAddingMarkers}
+          />
+        </Map>
+      </>
+    )
   )
 }
 

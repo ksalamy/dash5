@@ -7,6 +7,8 @@ import {
   ScaleControl,
   useMapEvents,
 } from 'react-leaflet'
+import dynamic from 'next/dynamic'
+import 'leaflet.gridlayer.googlemutant'
 import ReactLeafletGoogleLayer from 'react-leaflet-google-layer'
 import Control from 'react-leaflet-custom-control'
 import 'leaflet/dist/leaflet.css'
@@ -23,19 +25,20 @@ import {
   faCircleCheck,
   faRulerCombined,
   faArrowsUpDownLeftRight,
+  faLocationDot,
 } from '@fortawesome/free-solid-svg-icons'
 import { faCircleXmark } from '@fortawesome/free-regular-svg-icons'
 import { Measurement } from './Measurement'
 import MovingDot from './MovingDot'
 import { AreaComponent, PathComponent, MeasurementProps } from './Measurement'
 import { CenterView } from './MapViews'
-import { map } from 'leaflet'
+import toast from 'react-hot-toast'
 
 const regex = /\B(?=(\d{3})+(?!\d))/g
 let mapCoord: String
 let dmsCoord: String
 
-export interface MapProps {
+export interface MapProps extends React.HTMLAttributes<HTMLDivElement> {
   className?: string
   style?: React.CSSProperties
   center?: [number, number]
@@ -47,11 +50,16 @@ export interface MapProps {
   fitBounds?: [[number, number], [number, number]]
   viewMode?: 'center' | 'bounds' | null
   scrollWheelZoom?: boolean
+  isAddingMarkers?: boolean
+  onToggleMarkerMode?: () => void
+  onRequestMarkers?: () => void
   onRequestDepth?: MouseCoordinatesProps['onRequestDepth']
   onRequestCoordinate?: () => void
   onRequestFitBounds?: () => void
   onRequestPlatforms?: () => void
   onRequestStations?: () => void
+  whenCreated?: (map: L.Map) => void
+  onMapReady?: (map: L.Map) => void
   dmsCoord?: string
   mapCoord?: string
   children?: React.ReactNode
@@ -59,371 +67,735 @@ export interface MapProps {
 
 export type MeasureMode = 'open' | 'measuring' | 'closed' | 'cancelled'
 
-const Map: React.FC<MapProps> = ({
-  className,
-  style,
-  center = [36.7849, -122.12097],
-  centerZoom,
-  zoom = 17,
-  minZoom = 4,
-  maxZoom = 17,
-  maxNativeZoom = 13,
-  fitBounds,
-  viewMode,
-  children,
-  onRequestDepth,
-  onRequestCoordinate,
-  onRequestFitBounds,
-  onRequestPlatforms,
-  onRequestStations,
-}) => {
-  const [mapReady, setMapReady] = useState(false)
-  const [isMeasuring, setIsMeasuring] = useState(false)
-  const originalCenter = useRef(center)
-  const { baseLayer, setBaseLayer } = useMapBaseLayer()
-  const addBaseLayerHandler = useCallback(
-    (layer: BaseLayerOption) => () => {
-      setBaseLayer(layer)
-    },
-    [setBaseLayer]
-  )
-
-  // Create measurements
-  const [measurements, setMeasurements] = useState<
+const Map = React.forwardRef<L.Map, MapProps>(
+  (
     {
-      id: string
-      editing?: boolean
-      showPopup?: boolean
-    }[]
-  >([])
-
-  const handleLayersClick = () => {
-    // Call the handler without changing the center
-    onRequestStations?.()
-  }
-  const [count, setCount] = useState(0)
-  const [isHovering, setIsHovering] = useState(false)
-
-  const measStyle = {
-    color: '#00008b',
-    fontFamily: 'Helvetica Neue, Arial, Helvetica, sans- serif',
-    fontSize: '12px',
-  }
-
-  // Function to convert coordinate in deg to DMS
-  function ConvertDEGToDMS(deg: number, dir: boolean) {
-    var absolute = Math.abs(deg)
-    var degrees = Math.floor(absolute)
-    var minutesNotTruncated = (absolute - degrees) * 60
-    var minutes = Math.floor(minutesNotTruncated)
-    var seconds = ((minutesNotTruncated - minutes) * 60).toFixed(2)
-    if (dir) {
-      var direction = deg >= 0 ? 'N' : 'S'
-    } else {
-      var direction = deg >= 0 ? 'E' : 'W'
-    }
-    return degrees + '° ' + minutes + "' " + seconds + '" ' + direction
-  }
-
-  ///////////////////////////////////////////////////////////////
-  // Clicking on and determining map coordinates and formatting
-  //////////////////////////////////////////////////////////////
-  const MeasureEvents = () => {
-    useMapEvents({
-      click(e) {
-        let dir = true
-        mapCoord = e.latlng.lat.toFixed(6) + '  /  ' + e.latlng.lng.toFixed(6)
-        let latDMS = ConvertDEGToDMS(e.latlng.lat, dir)
-        dir = false
-        let lngDMS = ConvertDEGToDMS(e.latlng.lng, dir)
-        dmsCoord = latDMS + ' / ' + lngDMS
-        setCount(count + 1)
+      className,
+      style,
+      center = [36.7849, -122.12097],
+      centerZoom,
+      zoom = 17,
+      minZoom = 4,
+      maxZoom = 17,
+      maxNativeZoom = 13,
+      fitBounds,
+      viewMode,
+      children,
+      isAddingMarkers = false,
+      onToggleMarkerMode,
+      onRequestMarkers,
+      onRequestDepth,
+      onRequestCoordinate,
+      onRequestFitBounds,
+      onRequestPlatforms,
+      onRequestStations,
+    },
+    ref
+  ) => {
+    const mapRef = useRef<L.Map | null>(null)
+    const [mapReady, setMapReady] = useState(false)
+    const [isMeasuring, setIsMeasuring] = useState(false)
+    // const originalCenter = useRef(center)
+    const { baseLayer, setBaseLayer } = useMapBaseLayer()
+    const addBaseLayerHandler = useCallback(
+      (layer: BaseLayerOption) => () => {
+        setBaseLayer(layer)
       },
-    })
-    return (
-      <div hidden>
-        {dmsCoord}
-        {mapCoord}
-      </div>
+      [setBaseLayer]
     )
-  }
 
-  let element = <div></div>
-  if (count == 0) {
-    element = (
-      <>
-        Continue clicking on the map to measure distance or area
-        <br />
-        <br />
-      </>
-    )
-  } else if (count == 1) {
-    element = (
-      <>
-        Last Point
-        <br />
-        <div style={measStyle}>
-          {dmsCoord}
-          <br />
-          {mapCoord}
-        </div>
-        <hr className="hr-round"></hr>
-        <br />
-      </>
-    )
-  } else if (count == 2) {
-    element = (
-      <>
-        Last Point
-        <br />
-        <div style={measStyle}>
-          {dmsCoord}
-          <br />
-          {mapCoord}
-        </div>
-        <hr className="hr-round"></hr>
-        <br />
-        Path Distance
-        <br />
-        <div style={measStyle}>
-          <PathComponent />
-        </div>
-        <hr className="hr-round"></hr>
-        <br />
-      </>
-    )
-  } else if (count >= 3) {
-    element = (
-      <>
-        Last Point
-        <br />
-        <div style={measStyle}>
-          {dmsCoord}
-          <br />
-          {mapCoord}
-        </div>
-        <hr className="hr-round"></hr>
-        <br />
-        Path Distance
-        <br />
-        <div style={measStyle}>
-          <PathComponent />
-        </div>
-        <hr className="hr-round"></hr>
-        <br />
-        Area
-        <br />
-        <div style={measStyle}>
-          <AreaComponent />
-        </div>
-        <hr className="hr-round"></hr>
-        <br />
-      </>
-    )
-  }
+    // Create measurements
+    const [measurements, setMeasurements] = useState<
+      {
+        id: string
+        editing?: boolean
+        showPopup?: boolean
+      }[]
+    >([])
 
-  const gmrtLayer = useMemo(
-    () => (
-      <LayersControl.BaseLayer name="GMRT">
-        <WMSTileLayer
-          params={{
-            layers: 'GMRT',
-            format: 'image/png',
-          }}
-          url="https://www.gmrt.org/services/mapserver/wms_merc?"
-          maxNativeZoom={maxNativeZoom}
-          minZoom={minZoom}
-          maxZoom={maxZoom}
-          eventHandlers={{
-            add: addBaseLayerHandler('GMRT'),
-          }}
-        />{' '}
-      </LayersControl.BaseLayer>
-    ),
-    [addBaseLayerHandler, maxNativeZoom, minZoom, maxZoom]
-  )
+    const [markers, setMarkers] = useState<
+      Array<{
+        id: number
+        lat: number
+        lng: number
+        index: number
+        label: string
+      }>
+    >([])
+    console.log('Markers:', markers)
 
-  ////////////////////////////////////////
-  // Create measureMode and setMeasureMode
-  const [measureMode, setMeasureMode] = useState<MeasureMode>('closed')
-  // Create showDot and setShowDot
-  const [visibleDot, setVisibleDot] = useState('hidden')
-  // Set the default cursor
-  const [cursor, setCursor] = useState('default')
+    const [clickablePoints, setClickablePoints] = useState<
+      Array<{ id: number; lat: number; lng: number }>
+    >([])
+    console.log('Clickable points:', clickablePoints)
 
-  ///////////////////////////////////////////
-  //  changeMeasureMode
-  const changeMeasureMode = (mode: MeasureMode) => (e: React.MouseEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    // Set flag to prevent centering during measurements
-    if (mode === 'open' || mode === 'measuring') {
-      setIsMeasuring(true)
-    } else {
-      setIsMeasuring(false)
+    const [count, setCount] = useState(0)
+    const [isHovering, setIsHovering] = useState(false)
+
+    const measStyle = {
+      color: '#00008b',
+      fontFamily: 'Helvetica Neue, Arial, Helvetica, sans- serif',
+      fontSize: '12px',
     }
 
-    if (mode === 'open') {
-      setCount(0)
+    useEffect(() => {
+      console.log('MapContainer internal ref:', mapRef.current)
+      if (mapRef.current && typeof ref === 'function') {
+        ref(mapRef.current)
+      } else if (mapRef.current && ref && typeof ref === 'object') {
+        ref.current = mapRef.current
+      }
+    }, [ref])
+
+    // Function to convert coordinate in deg to DMS
+    function ConvertDEGToDMS(deg: number, dir: boolean) {
+      var absolute = Math.abs(deg)
+      var degrees = Math.floor(absolute)
+      var minutesNotTruncated = (absolute - degrees) * 60
+      var minutes = Math.floor(minutesNotTruncated)
+      var seconds = ((minutesNotTruncated - minutes) * 60).toFixed(2)
+      if (dir) {
+        var direction = deg >= 0 ? 'N' : 'S'
+      } else {
+        var direction = deg >= 0 ? 'E' : 'W'
+      }
+      return degrees + '° ' + minutes + "' " + seconds + '" ' + direction
     }
-    if (mode === 'measuring') {
-      setCount(0)
-      setMeasurements((prev) => [
-        ...prev,
-        { id: Date.now().toLocaleString(), editing: true, showPopup: false },
-      ])
-    }
-    if (mode === 'closed') {
-      setCount(0)
-      setMeasurements((prev) =>
-        prev.map((p) => ({
-          ...p,
-          editing: false,
-          showPopup: true, // Set this to true when finishing
-        }))
+
+    ///////////////////////////////////////////////////////////////
+    // Clicking on and determining map coordinates and formatting
+    //////////////////////////////////////////////////////////////
+    const MeasureEvents = () => {
+      useMapEvents({
+        click(e) {
+          let dir = true
+          mapCoord = e.latlng.lat.toFixed(6) + '  /  ' + e.latlng.lng.toFixed(6)
+          let latDMS = ConvertDEGToDMS(e.latlng.lat, dir)
+          dir = false
+          let lngDMS = ConvertDEGToDMS(e.latlng.lng, dir)
+          dmsCoord = latDMS + ' / ' + lngDMS
+          setCount(count + 1)
+        },
+      })
+      return (
+        <div hidden>
+          {dmsCoord}
+          {mapCoord}
+        </div>
       )
     }
-    if (mode === 'cancelled') {
-      setCount(0)
-      setMeasurements((prev) => [])
+
+    let element = <div></div>
+    if (count == 0) {
+      element = (
+        <>
+          Continue clicking on the map to measure distance or area
+          <br />
+          <br />
+        </>
+      )
+    } else if (count == 1) {
+      element = (
+        <>
+          Last Point
+          <br />
+          <div style={measStyle}>
+            {dmsCoord}
+            <br />
+            {mapCoord}
+          </div>
+          <hr className="hr-round"></hr>
+          <br />
+        </>
+      )
+    } else if (count == 2) {
+      element = (
+        <>
+          Last Point
+          <br />
+          <div style={measStyle}>
+            {dmsCoord}
+            <br />
+            {mapCoord}
+          </div>
+          <hr className="hr-round"></hr>
+          <br />
+          Path Distance
+          <br />
+          <div style={measStyle}>
+            <PathComponent />
+          </div>
+          <hr className="hr-round"></hr>
+          <br />
+        </>
+      )
+    } else if (count >= 3) {
+      element = (
+        <>
+          Last Point
+          <br />
+          <div style={measStyle}>
+            {dmsCoord}
+            <br />
+            {mapCoord}
+          </div>
+          <hr className="hr-round"></hr>
+          <br />
+          Path Distance
+          <br />
+          <div style={measStyle}>
+            <PathComponent />
+          </div>
+          <hr className="hr-round"></hr>
+          <br />
+          Area
+          <br />
+          <div style={measStyle}>
+            <AreaComponent />
+          </div>
+          <hr className="hr-round"></hr>
+          <br />
+        </>
+      )
     }
-    setMeasureMode(mode)
-  }
 
-  const handleRequestCoordinate = (e: React.MouseEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    onRequestCoordinate?.()
-  }
+    const gmrtLayer = useMemo(
+      () => (
+        <LayersControl.BaseLayer name="GMRT">
+          <WMSTileLayer
+            params={{
+              layers: 'GMRT',
+              format: 'image/png',
+            }}
+            url="https://www.gmrt.org/services/mapserver/wms_merc?"
+            maxNativeZoom={maxNativeZoom}
+            minZoom={minZoom}
+            maxZoom={maxZoom}
+            eventHandlers={{
+              add: addBaseLayerHandler('GMRT'),
+            }}
+          />{' '}
+        </LayersControl.BaseLayer>
+      ),
+      [addBaseLayerHandler, maxNativeZoom, minZoom, maxZoom]
+    )
 
-  const handleRequestFitBounds = (e: React.MouseEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    onRequestFitBounds?.()
-  }
+    ////////////////////////////////////////
+    // Create measureMode and setMeasureMode
+    const [measureMode, setMeasureMode] = useState<MeasureMode>('closed')
+    // Create showDot and setShowDot
+    const [visibleDot, setVisibleDot] = useState('hidden')
+    // Set the default cursor
+    const [cursor, setCursor] = useState('default')
 
-  const handleMouseOver = (e: React.MouseEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setVisibleDot('hidden')
-  }
+    ///////////////////////////////////////////
+    //  changeMeasureMode
+    const changeMeasureMode = (mode: MeasureMode) => (e: React.MouseEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      // Set flag to prevent centering during measurements
+      if (mode === 'open' || mode === 'measuring') {
+        setIsMeasuring(true)
+      } else {
+        setIsMeasuring(false)
+      }
 
-  // removeMeasurement
-  const removeMeasurement = useCallback(
-    (id: string) => () => {
-      setMeasurements((prev) => prev.filter((m) => m.id !== id))
-    },
-    []
-  )
+      if (mode === 'open') {
+        setCount(0)
+      }
+      if (mode === 'measuring') {
+        setCount(0)
+        setMeasurements((prev) => [
+          ...prev,
+          { id: Date.now().toLocaleString(), editing: true, showPopup: false },
+        ])
+      }
+      if (mode === 'closed') {
+        setCount(0)
+        setMeasurements((prev) =>
+          prev.map((p) => ({
+            ...p,
+            editing: false,
+            showPopup: true, // Set this to true when finishing
+          }))
+        )
+      }
+      if (mode === 'cancelled') {
+        setCount(0)
+        setMeasurements((prev) => [])
+      }
+      setMeasureMode(mode)
+    }
 
-  useEffect(() => {
-    // Wait for map to be fully initialized
-    const timer = setTimeout(() => {
-      setMapReady(true)
-    }, 1000)
+    const handleRequestCoordinate = (e: React.MouseEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      onRequestCoordinate?.()
+    }
 
-    return () => clearTimeout(timer)
-  }, [])
+    const handleRequestFitBounds = (e: React.MouseEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      onRequestFitBounds?.()
+    }
 
-  return (
-    <MapContainer
-      center={center}
-      zoom={zoom}
-      scrollWheelZoom={true}
-      className={className}
-      style={style}
-      minZoom={minZoom}
-      maxZoom={maxZoom}
-      // @ts-ignore
-      maxNativeZoom={maxNativeZoom}
-    >
-      {!isMeasuring && (
-        <CenterView
-          coords={center}
-          bounds={fitBounds}
-          zoom={centerZoom}
-          viewMode={viewMode} // Pass this through
-        />
-      )}
-      <ScaleControl position="topright" />
-      <LayersControl position="topright">
-        {mapReady && (
-          <LayersControl.BaseLayer
-            name="Google Hybrid"
-            checked={baseLayer === 'Google Hybrid'}
-          >
-            <ReactLeafletGoogleLayer
-              useGoogMapsLoader={false}
-              type="hybrid"
-              eventHandlers={{
-                add: addBaseLayerHandler('Google Hybrid'),
-              }}
-            />
-          </LayersControl.BaseLayer>
+    const handleMouseOver = (e: React.MouseEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      setVisibleDot('hidden')
+    }
+
+    const handleToggleMarkerMode = (e: React.MouseEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      onToggleMarkerMode?.()
+    }
+
+    const handleMarkersClick = (e: React.MouseEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      onRequestMarkers?.()
+    }
+
+    const handleLayersClick = (e: React.MouseEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      onRequestStations?.()
+    }
+
+    // removeMeasurement
+    const removeMeasurement = useCallback(
+      (id: string) => () => {
+        setMeasurements((prev) => prev.filter((m) => m.id !== id))
+      },
+      []
+    )
+
+    // Wait for map to be fully initialized before setting mapReady to true
+    useEffect(() => {
+      const timer = setTimeout(() => {
+        setMapReady(true)
+      }, 1000)
+      return () => clearTimeout(timer)
+    }, [])
+
+    // Add a useEffect to handle cursor changes when marker mode is toggled
+    useEffect(() => {
+      // Get the map container
+      const mapContainer = document.querySelector('.leaflet-container')
+      if (mapContainer) {
+        // Set cursor style based on isAddingMarkers state
+        if (isAddingMarkers) {
+          mapContainer.classList.add('adding-markers-cursor')
+        } else {
+          mapContainer.classList.remove('adding-markers-cursor')
+        }
+      }
+      // Clean up on unmount
+      return () => {
+        if (mapContainer) {
+          mapContainer.classList.remove('adding-markers-cursor')
+        }
+      }
+    }, [isAddingMarkers])
+    console.log('Map ref:', ref)
+
+    return (
+      <MapContainer
+        center={center}
+        zoom={zoom}
+        scrollWheelZoom={true}
+        className={className}
+        style={style}
+        minZoom={minZoom}
+        maxZoom={maxZoom}
+        // @ts-ignore
+        maxNativeZoom={maxNativeZoom}
+        ref={mapRef}
+      >
+        {!isMeasuring && (
+          <CenterView
+            coords={center}
+            bounds={fitBounds}
+            zoom={centerZoom}
+            viewMode={viewMode} // Pass this through
+          />
         )}
-        {mapReady && (
-          <LayersControl.BaseLayer
-            name="ESRI Oceans/Labels"
-            checked={baseLayer === 'ESRI Oceans/Labels'}
-          >
-            <TileLayer
-              url="https://ibasemaps-api.arcgis.com/arcgis/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}?//token=<ACCESS_TOKEN>process.env.REACT_APP_ESRI_API_KEY</ACCESS_TOKEN>"
-              attribution='&copy; <a href="https://developers.arcgis.com/">ArcGIS</a>'
-              maxNativeZoom={maxNativeZoom}
-              eventHandlers={{
-                add: addBaseLayerHandler('ESRI Oceans/Labels'),
-              }}
-            />
-          </LayersControl.BaseLayer>
-        )}
-        {gmrtLayer}
-        {mapReady && (
-          <LayersControl.BaseLayer
-            name="OpenStreetmaps"
-            checked={baseLayer === 'OpenStreetmaps'}
-          >
-            <TileLayer
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              eventHandlers={{
-                add: addBaseLayerHandler('OpenStreetmaps'),
-              }}
-            />
-          </LayersControl.BaseLayer>
-        )}
-        {mapReady && (
-          <LayersControl.BaseLayer
-            name="Dark Layer (CARTO)"
-            checked={baseLayer === 'Dark Layer (CARTO)'}
-          >
-            <TileLayer
-              attribution='&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, &copy; <a href="https://carto.com/attributions">CARTO</a>'
-              url="https://cartodb-basemaps-{s}.global.ssl.fastly.net/dark_nolabels/{z}/{x}/{y}.png"
-              eventHandlers={{
-                add: addBaseLayerHandler('Dark Layer (CARTO)'),
-              }}
-            />
-          </LayersControl.BaseLayer>
-        )}
-      </LayersControl>
-      <Control prepend position="topright">
-        <MouseCoordinates onRequestDepth={onRequestDepth} />
-      </Control>
-      {children}
-
-      {/* COORDINATE CONTROLS */}
-      {onRequestCoordinate || onRequestFitBounds ? (
+        {/* {markers.map((marker) => (
+          <DraggableMarker
+            key={`marker-${marker.id}`}
+            lat={marker.lat}
+            lng={marker.lng}
+            index={marker.index}
+            draggable={true}
+            onDragEnd={(_, latlng) => handleMarkerDragEnd(marker.id, latlng)}
+            tooltipContent={marker.label}
+            zIndexOffset={100}
+            onClick={() => {
+              toast(`Marker clicked: ${marker.id}`)
+            }}
+          />
+        ))} */}
+        <ScaleControl position="topright" />
+        <LayersControl position="topright">
+          {mapReady && (
+            <LayersControl.BaseLayer
+              name="Google Hybrid"
+              checked={baseLayer === 'Google Hybrid'}
+            >
+              <ReactLeafletGoogleLayer
+                useGoogMapsLoader={false}
+                type="hybrid"
+                eventHandlers={{
+                  add: addBaseLayerHandler('Google Hybrid'),
+                }}
+              />
+            </LayersControl.BaseLayer>
+          )}
+          {mapReady && (
+            <LayersControl.BaseLayer
+              name="ESRI Oceans/Labels"
+              checked={baseLayer === 'ESRI Oceans/Labels'}
+            >
+              <TileLayer
+                url="https://ibasemaps-api.arcgis.com/arcgis/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}?//token=<ACCESS_TOKEN>process.env.REACT_APP_ESRI_API_KEY</ACCESS_TOKEN>"
+                attribution='&copy; <a href="https://developers.arcgis.com/">ArcGIS</a>'
+                maxNativeZoom={maxNativeZoom}
+                eventHandlers={{
+                  add: addBaseLayerHandler('ESRI Oceans/Labels'),
+                }}
+              />
+            </LayersControl.BaseLayer>
+          )}
+          {gmrtLayer}
+          {mapReady && (
+            <LayersControl.BaseLayer
+              name="OpenStreetmaps"
+              checked={baseLayer === 'OpenStreetmaps'}
+            >
+              <TileLayer
+                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                eventHandlers={{
+                  add: addBaseLayerHandler('OpenStreetmaps'),
+                }}
+              />
+            </LayersControl.BaseLayer>
+          )}
+          {mapReady && (
+            <LayersControl.BaseLayer
+              name="Dark Layer (CARTO)"
+              checked={baseLayer === 'Dark Layer (CARTO)'}
+            >
+              <TileLayer
+                attribution='&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                url="https://cartodb-basemaps-{s}.global.ssl.fastly.net/dark_nolabels/{z}/{x}/{y}.png"
+                eventHandlers={{
+                  add: addBaseLayerHandler('Dark Layer (CARTO)'),
+                }}
+              />
+            </LayersControl.BaseLayer>
+          )}
+        </LayersControl>
+        <Control prepend position="topright">
+          <MouseCoordinates onRequestDepth={onRequestDepth} />
+        </Control>
+        {children}
+        {/* TRACKDB/STATIONS CONTROLS - Now in separate Control component */}
         <Control position="topleft">
-          {onRequestCoordinate && (
-            <>
+          <Tippy
+            content="Track Database"
+            placement="right-start"
+            theme="mapBtnTT"
+          >
+            <button
+              id="trackdb"
+              className="trackdb rounded"
+              onMouseOver={handleMouseOver}
+              style={{
+                position: 'relative',
+                zIndex: isHovering ? 900 : 10,
+                border: '0px solid rgba(0,0,0,0.2)',
+                backgroundClip: 'padding-box',
+                width: 55,
+                height: 30,
+              }}
+              onClick={onRequestPlatforms}
+            >
+              <span style={{ color: '#FFFFFF' }}>TrackDB</span>
+            </button>
+          </Tippy>
+          <hr style={{ height: '8pt', visibility: 'hidden' }} />
+          <Tippy
+            content="Stations Database"
+            placement="right-start"
+            theme="mapBtnTT"
+          >
+            <button
+              id="stationsdb"
+              className="stationsdb rounded"
+              onMouseOver={handleMouseOver}
+              style={{
+                position: 'relative',
+                zIndex: isHovering ? 900 : 10,
+                border: '0px solid rgba(0,0,0,0.2)',
+                backgroundClip: 'padding-box',
+                width: 55,
+                height: 30,
+              }}
+              onClick={handleLayersClick}
+            >
+              <span style={{ color: '#FFFFFF' }}>Layers</span>
+            </button>
+          </Tippy>
+        </Control>
+
+        {/* COORDINATE CONTROLS */}
+        {onRequestCoordinate || onRequestFitBounds || onToggleMarkerMode ? (
+          <Control position="topleft">
+            {onRequestCoordinate && (
+              <>
+                <Tippy
+                  content="Center map on centroid of latest GPS Fix positions"
+                  placement="right-start"
+                  theme="mapBtnTT"
+                >
+                  <button
+                    id="vehicle-center"
+                    className="vehicle-center rounded"
+                    onMouseOver={handleMouseOver}
+                    style={{
+                      position: 'relative',
+                      zIndex: isHovering ? 900 : 10,
+                      border: '0px solid rgba(0,0,0,0.2)',
+                      backgroundClip: 'padding-box',
+                      width: 42,
+                      height: 42,
+                    }}
+                    onClick={handleRequestCoordinate}
+                  >
+                    <FontAwesomeIcon
+                      icon={faArrowsToCircle}
+                      size="2xl"
+                      color="#ffffff"
+                    />
+                  </button>
+                </Tippy>
+                <hr style={{ height: '8pt', visibility: 'hidden' }} />
+              </>
+            )}
+
+            {onRequestFitBounds && (
+              <>
+                <Tippy
+                  content="Zoom to all available/selected vehicles"
+                  placement="right-start"
+                  theme="mapBtnTT"
+                >
+                  <button
+                    id="allVehicles-center"
+                    className="allVehicles-center rounded"
+                    onMouseOver={handleMouseOver}
+                    style={{
+                      position: 'relative',
+                      zIndex: isHovering ? 900 : 10,
+                      border: '0px solid rgba(0,0,0,0.2)',
+                      backgroundClip: 'padding-box',
+                      width: 42,
+                      height: 42,
+                    }}
+                    onClick={handleRequestFitBounds}
+                  >
+                    <FontAwesomeIcon
+                      icon={faArrowsUpDownLeftRight}
+                      size="2xl"
+                      color="#ffffff"
+                    />
+                  </button>
+                </Tippy>
+                <hr style={{ height: '8pt', visibility: 'hidden' }} />
+              </>
+            )}
+
+            {onToggleMarkerMode && (
+              <>
+                <Tippy
+                  content={
+                    isAddingMarkers
+                      ? 'Cancel adding markers'
+                      : 'Add markers to map'
+                  }
+                  placement="right-start"
+                  theme="mapBtnTT"
+                >
+                  <button
+                    id="toggle-markers"
+                    className="toggle-markers rounded"
+                    onMouseOver={handleMouseOver}
+                    style={{
+                      position: 'relative',
+                      zIndex: isHovering ? 900 : 10,
+                      border: '0px solid rgba(0,0,0,0.2)',
+                      backgroundClip: 'padding-box',
+                      width: 42,
+                      height: 42,
+                    }}
+                    onClick={handleToggleMarkerMode}
+                  >
+                    <FontAwesomeIcon
+                      icon={faLocationDot}
+                      size="2xl"
+                      className={isAddingMarkers ? 'pulsing-icon' : ''}
+                      color={isAddingMarkers ? '#FF0000' : '#ffffff'}
+                    />
+                  </button>
+                </Tippy>
+                <hr style={{ height: '8pt', visibility: 'hidden' }} />
+              </>
+            )}
+          </Control>
+        ) : null}
+
+        {/* MEASUREMENT CONTROLS - In a separate Control component */}
+        <Control position="topright">
+          {measurements.map((m) => (
+            <React.Fragment key={m.id}>
+              <Measurement
+                editing={m.editing}
+                showPopup={m.showPopup} // Pass the flag here
+                onDelete={removeMeasurement(m.id)}
+              />
+              <MovingDot editing={m.editing} />
+            </React.Fragment>
+          ))}
+
+          {/* Measurement mode: OPEN */}
+          {measureMode === 'open' ? (
+            <div
+              id="measModeOpen"
+              className="leaflet-pointer rounded bg-white text-stone-500"
+              onDragStart={() => setCursor('pointer')}
+              style={{
+                border: '2px solid rgba(0,0,0,0.2)',
+                backgroundClip: 'padding-box',
+                width: 250,
+                maxWidth: 250,
+              }}
+            >
+              <p className="measure-info" cursor-pointer>
+                <a
+                  id="createMeasLink"
+                  className="mousechange:hover cursor-pointer:onHover leaflet-pointer text-bg-blue-600 hover:text-bg-blue-800 w-full bg-white"
+                  onClick={(e) => changeMeasureMode('measuring')(e)}
+                >
+                  <FontAwesomeIcon
+                    icon={faCircleCheck}
+                    size="xl"
+                    id="circleCheck"
+                    style={{
+                      marginLeft: '.5rem',
+                      marginRight: '0.25rem',
+                    }}
+                  />
+                  {'    '} Create A New Measurement {'    '}
+                </a>
+                <button
+                  id="closeMeasBtn"
+                  className="mousechange:hover cursor-pointer:onHover p-1"
+                  onClick={(e) => changeMeasureMode('closed')(e)}
+                  onMouseOver={handleMouseOver}
+                  style={{
+                    position: 'relative',
+                    zIndex: isHovering ? 900 : 10,
+                  }}
+                >
+                  <FontAwesomeIcon
+                    icon={faCircleXmark}
+                    size="xl"
+                    id="xMark"
+                    style={{ marginLeft: '1rem' }}
+                  />
+                </button>
+              </p>
+            </div>
+          ) : null}
+
+          {/* Measurement mode: MEASURING */}
+          {measureMode === 'measuring' ? (
+            <div
+              id="measModeMeasuring"
+              className="cursor-pointer:onHover rounded bg-white p-2 text-stone-500"
+              style={{
+                border: '2px solid rgba(0,0,0,0.2)',
+                backgroundClip: 'padding-box',
+                width: 250,
+                maxWidth: 250,
+              }}
+            >
+              <p className="measure-info cursor-pointer:onHover">
+                <br />
+                <h6>
+                  <span className="font-bold text-blue-600">
+                    Measure Distances and Areas
+                  </span>
+                </h6>
+                <br />
+                <hr className="hr-round"></hr>
+                <br />
+                {element}
+              </p>
+              <ul className="mousechange leaflet-pointer grid">
+                <li>
+                  <button
+                    id="finishMeasBtn"
+                    className="leaflet-pointer w-full rounded border bg-blue-600 p-1 text-white hover:bg-blue-800"
+                    title="Finish Measurement"
+                    onMouseOver={handleMouseOver}
+                    style={{
+                      position: 'relative',
+                      zIndex: isHovering ? 900 : 10,
+                    }}
+                    onClick={(e) => changeMeasureMode('closed')(e)}
+                  >
+                    <FontAwesomeIcon icon={faCircleCheck} /> Finish Measurement
+                  </button>
+                </li>
+                <li>
+                  <br />
+                </li>
+                <li>
+                  <button
+                    id="cancelMeasBtn"
+                    className="leaflet-poiner w-full rounded border bg-white p-1 text-primary-600 hover:bg-gray-100"
+                    title="Cancel Measurement"
+                    onMouseOver={handleMouseOver}
+                    style={{
+                      position: 'relative',
+                      zIndex: isHovering ? 900 : 10,
+                    }}
+                    onClick={(e) => changeMeasureMode('closed')(e)}
+                  >
+                    <FontAwesomeIcon icon={faCircleXmark} /> Cancel
+                  </button>
+                </li>
+              </ul>
+            </div>
+          ) : null}
+        </Control>
+
+        {/* MEASUREMENT BUTTON - In a separate Control component */}
+        <Control position="topright">
+          {measureMode === 'closed' ? (
+            <div id="measModeClosed">
               <Tippy
-                content="Center map on centroid of latest GPS Fix positions"
-                placement="right-start"
+                content="Measure Distances and Areas"
+                placement="left-start"
                 theme="mapBtnTT"
               >
                 <button
-                  id="vehicle-center"
-                  className="vehicle-center rounded"
+                  id="openMeasBtn"
+                  className="openMeasBtn rounded"
+                  onDragEnd={() => setCursor('pointer')}
                   onMouseOver={handleMouseOver}
                   style={{
                     position: 'relative',
@@ -433,235 +805,22 @@ const Map: React.FC<MapProps> = ({
                     width: 42,
                     height: 42,
                   }}
-                  onClick={handleRequestCoordinate}
+                  onClick={(e) => changeMeasureMode('open')(e)}
                 >
                   <FontAwesomeIcon
-                    icon={faArrowsToCircle}
+                    icon={faRulerCombined}
                     size="2xl"
-                    color="#ffffff"
+                    color="#FFFFFF"
                   />
                 </button>
               </Tippy>
-              <hr style={{ height: '8pt', visibility: 'hidden' }} />
-            </>
-          )}
-
-          {onRequestFitBounds && (
-            <Tippy
-              content="Zoom to all available/selected vehicles"
-              placement="right-start"
-              theme="mapBtnTT"
-            >
+            </div>
+          ) : null}
+          {measureMode === 'cancelled' ? (
+            <Tippy content="Measure Distances and Areas" placement="left-start">
               <button
-                id="allVehicles-center"
-                className="allVehicles-center rounded"
-                onMouseOver={handleMouseOver}
-                style={{
-                  position: 'relative',
-                  zIndex: isHovering ? 900 : 10,
-                  border: '0px solid rgba(0,0,0,0.2)',
-                  backgroundClip: 'padding-box',
-                  width: 42,
-                  height: 42,
-                }}
-                onClick={handleRequestFitBounds}
-              >
-                <FontAwesomeIcon
-                  icon={faArrowsUpDownLeftRight}
-                  size="2xl"
-                  color="#ffffff"
-                />
-              </button>
-            </Tippy>
-          )}
-        </Control>
-      ) : null}
-      {/* TRACKDB/STATIONS CONTROLS - Now in separate Control component */}
-      <Control position="topleft">
-        <Tippy
-          content="Track Database"
-          placement="right-start"
-          theme="mapBtnTT"
-        >
-          <button
-            id="trackdb"
-            className="trackdb rounded"
-            onMouseOver={handleMouseOver}
-            style={{
-              position: 'relative',
-              zIndex: isHovering ? 900 : 10,
-              border: '0px solid rgba(0,0,0,0.2)',
-              backgroundClip: 'padding-box',
-              width: 55,
-              height: 30,
-            }}
-            onClick={onRequestPlatforms}
-          >
-            <span style={{ color: '#FFFFFF' }}>TrackDB</span>
-          </button>
-        </Tippy>
-        <hr style={{ height: '8pt', visibility: 'hidden' }} />
-        <Tippy
-          content="Stations Database"
-          placement="right-start"
-          theme="mapBtnTT"
-        >
-          <button
-            id="stationsdb"
-            className="stationsdb rounded"
-            onMouseOver={handleMouseOver}
-            style={{
-              position: 'relative',
-              zIndex: isHovering ? 900 : 10,
-              border: '0px solid rgba(0,0,0,0.2)',
-              backgroundClip: 'padding-box',
-              width: 55,
-              height: 30,
-            }}
-            onClick={handleLayersClick}
-          >
-            <span style={{ color: '#FFFFFF' }}>Layers</span>
-          </button>
-        </Tippy>
-      </Control>
-
-      {/* MEASUREMENT CONTROLS - In a separate Control component */}
-      <Control position="topright">
-        {measurements.map((m) => (
-          <React.Fragment key={m.id}>
-            <Measurement
-              editing={m.editing}
-              showPopup={m.showPopup} // Pass the flag here
-              onDelete={removeMeasurement(m.id)}
-            />
-            <MovingDot editing={m.editing} />
-          </React.Fragment>
-        ))}
-
-        {/* Measurement mode: OPEN */}
-        {measureMode === 'open' ? (
-          <div
-            id="measModeOpen"
-            className="leaflet-pointer rounded bg-white text-stone-500"
-            onDragStart={() => setCursor('pointer')}
-            style={{
-              border: '2px solid rgba(0,0,0,0.2)',
-              backgroundClip: 'padding-box',
-              width: 250,
-              maxWidth: 250,
-            }}
-          >
-            <p className="measure-info" cursor-pointer>
-              <a
-                id="createMeasLink"
-                className="mousechange:hover cursor-pointer:onHover leaflet-pointer text-bg-blue-600 hover:text-bg-blue-800 w-full bg-white"
-                onClick={(e) => changeMeasureMode('measuring')(e)}
-              >
-                <FontAwesomeIcon
-                  icon={faCircleCheck}
-                  size="xl"
-                  id="circleCheck"
-                  style={{
-                    marginLeft: '.5rem',
-                    marginRight: '0.25rem',
-                  }}
-                />
-                {'    '} Create A New Measurement {'    '}
-              </a>
-              <button
-                id="closeMeasBtn"
-                className="mousechange:hover cursor-pointer:onHover p-1"
-                onClick={(e) => changeMeasureMode('closed')(e)}
-                onMouseOver={handleMouseOver}
-                style={{
-                  position: 'relative',
-                  zIndex: isHovering ? 900 : 10,
-                }}
-              >
-                <FontAwesomeIcon
-                  icon={faCircleXmark}
-                  size="xl"
-                  id="xMark"
-                  style={{ marginLeft: '1rem' }}
-                />
-              </button>
-            </p>
-          </div>
-        ) : null}
-
-        {/* Measurement mode: MEASURING */}
-        {measureMode === 'measuring' ? (
-          <div
-            id="measModeMeasuring"
-            className="cursor-pointer:onHover rounded bg-white p-2 text-stone-500"
-            style={{
-              border: '2px solid rgba(0,0,0,0.2)',
-              backgroundClip: 'padding-box',
-              width: 250,
-              maxWidth: 250,
-            }}
-          >
-            <p className="measure-info cursor-pointer:onHover">
-              <br />
-              <h6>
-                <span className="font-bold text-blue-600">
-                  Measure Distances and Areas
-                </span>
-              </h6>
-              <br />
-              <hr className="hr-round"></hr>
-              <br />
-              {element}
-            </p>
-            <ul className="mousechange leaflet-pointer grid">
-              <li>
-                <button
-                  id="finishMeasBtn"
-                  className="leaflet-pointer w-full rounded border bg-blue-600 p-1 text-white hover:bg-blue-800"
-                  onMouseOver={handleMouseOver}
-                  style={{
-                    position: 'relative',
-                    zIndex: isHovering ? 900 : 10,
-                  }}
-                  onClick={(e) => changeMeasureMode('closed')(e)}
-                >
-                  <FontAwesomeIcon icon={faCircleCheck} /> Finish Measurement
-                </button>
-              </li>
-              <li>
-                <br />
-              </li>
-              <li>
-                <button
-                  id="cancelMeasBtn"
-                  className="leaflet-poiner w-full rounded border bg-white p-1 text-primary-600 hover:bg-gray-100"
-                  onMouseOver={handleMouseOver}
-                  style={{
-                    position: 'relative',
-                    zIndex: isHovering ? 900 : 10,
-                  }}
-                  onClick={(e) => changeMeasureMode('closed')(e)}
-                >
-                  <FontAwesomeIcon icon={faCircleXmark} /> Cancel
-                </button>
-              </li>
-            </ul>
-          </div>
-        ) : null}
-      </Control>
-
-      {/* MEASUREMENT BUTTON - In a separate Control component */}
-      <Control position="topright">
-        {measureMode === 'closed' ? (
-          <div id="measModeClosed">
-            <Tippy
-              content="Measure Distances and Areas"
-              placement="left-start"
-              theme="mapBtnTT"
-            >
-              <button
-                id="openMeasBtn"
-                className="openMeasBtn rounded"
+                id="measBtn"
+                className="measBtn rounded"
                 onDragEnd={() => setCursor('pointer')}
                 onMouseOver={handleMouseOver}
                 style={{
@@ -672,7 +831,7 @@ const Map: React.FC<MapProps> = ({
                   width: 42,
                   height: 42,
                 }}
-                onClick={(e) => changeMeasureMode('open')(e)}
+                onClick={(e) => changeMeasureMode('closed')(e)}
               >
                 <FontAwesomeIcon
                   icon={faRulerCombined}
@@ -681,38 +840,13 @@ const Map: React.FC<MapProps> = ({
                 />
               </button>
             </Tippy>
-          </div>
-        ) : null}
-        {measureMode === 'cancelled' ? (
-          <Tippy content="Measure Distances and Areas" placement="left-start">
-            <button
-              id="measBtn"
-              className="measBtn rounded"
-              onDragEnd={() => setCursor('pointer')}
-              onMouseOver={handleMouseOver}
-              style={{
-                position: 'relative',
-                zIndex: isHovering ? 900 : 10,
-                border: '0px solid rgba(0,0,0,0.2)',
-                backgroundClip: 'padding-box',
-                width: 42,
-                height: 42,
-              }}
-              onClick={(e) => changeMeasureMode('closed')(e)}
-            >
-              <FontAwesomeIcon
-                icon={faRulerCombined}
-                size="2xl"
-                color="#FFFFFF"
-              />
-            </button>
-          </Tippy>
-        ) : null}
-      </Control>
-      <MeasureEvents />
-    </MapContainer>
-  )
-}
+          ) : null}
+        </Control>
+        <MeasureEvents />
+      </MapContainer>
+    )
+  }
+)
 
 Map.displayName = 'Map.Map'
 

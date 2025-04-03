@@ -1,4 +1,5 @@
 import { useCallback, useRef, useMemo } from 'react'
+import { toast } from 'react-hot-toast'
 
 export const useGoogleElevator = () => {
   const elevator = useMemo(() => {
@@ -18,7 +19,7 @@ export const useGoogleElevator = () => {
   const handleDepthRequest = useCallback(
     async (lat: number, lng: number) => {
       if (!elevator) {
-        console.error('Elevation service is unavailable.')
+        toast.error('Elevation service is unavailable.')
         return 0
       }
 

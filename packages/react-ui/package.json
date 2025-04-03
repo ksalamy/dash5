@@ -57,6 +57,7 @@
     "immutability-helper": "^3.1.1",
     "leaflet": "^1.8.0",
     "leaflet-easybutton": "2.4.0",
+    "leaflet.gridlayer.googlemutant": "^0.1.9",
     "leaflet-measure": "^3.1.0",
     "leaflet-mouse-position": "1.2.0",
     "leaflet-routing-machine": "3.2.12",

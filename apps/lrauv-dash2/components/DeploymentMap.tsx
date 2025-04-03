@@ -1,10 +1,13 @@
 import dynamic from 'next/dynamic'
 import React, { useCallback, useState, useRef, useEffect } from 'react'
 import { useManagedWaypoints } from '@mbari/react-ui'
+import type { MapProps } from '@mbari/react-ui/dist/Map/Map'
 import { useGoogleElevator } from '../lib/useGoogleElevator'
 import { VPosDetail } from '@mbari/api-client'
 import { StationsListModal } from './StationsListModal'
 import { useSelectedStations } from './SelectedStationContext'
+import { useMapEvents } from 'react-leaflet'
+import 'leaflet.gridlayer.googlemutant'
 
 // This is a tricky workaround to prevent leaflet from crashing next.js
 // SSR. If we don't do this, the leaflet map will be loaded server side
@@ -18,6 +21,12 @@ const DraggableMarker = dynamic(() => import('./DraggableMarker'), {
 const ClickableMapPoint = dynamic(() => import('./ClickableMapPoint'), {
   ssr: false,
 })
+// const GoogleMapLayer = dynamic(
+//   () => import('@mbari/react-ui/dist/Map/maLayer'),
+//   {
+//     ssr: false,
+//   }
+// )
 const VehiclePath = dynamic(() => import('./VehiclePath'), {
   ssr: false,
 })
@@ -35,6 +44,11 @@ interface DeploymentMapProps {
   startTime?: number | null
   endTime?: number | null
 }
+// Type assertion to ensure MapProps has the expected properties
+type CustomMapProps = MapProps & {
+  isAddingMarkers?: boolean
+  onToggleMarkerMode?: () => void
+}
 
 const DeploymentMap: React.FC<DeploymentMapProps> = ({
   vehicleName,
@@ -49,6 +63,86 @@ const DeploymentMap: React.FC<DeploymentMapProps> = ({
     editable,
     focusedWaypointIndex,
   } = useManagedWaypoints()
+
+  // Add state for marker mode
+  const [isAddingMarkers, setIsAddingMarkers] = useState(false)
+  const [customMarkers, setCustomMarkers] = useState<
+    Array<{
+      id: number
+      lat: number
+      lng: number
+      index: number
+    }>
+  >([])
+
+  // Handler for toggling marker mode
+  const handleToggleMarkerMode = useCallback(() => {
+    setIsAddingMarkers((prev) => !prev)
+  }, [])
+
+  // Handler for adding markers when map is clicked
+  const handleAddMarker = useCallback(
+    (e: L.LeafletMouseEvent) => {
+      if (isAddingMarkers) {
+        setCustomMarkers((prev) => [
+          ...prev,
+          {
+            id: Date.now(),
+            lat: e.latlng.lat,
+            lng: e.latlng.lng,
+            index: prev.length % 19, // Cycle through icon styles
+          },
+        ])
+      }
+    },
+    [isAddingMarkers]
+  )
+
+  // Reference to the map instance
+  const mapRef = useRef<L.Map | null>(null)
+
+  // Set up click handler when marker mode changes
+  const MapClickHandler = () => {
+    const map = useMapEvents({
+      click: (e) => {
+        if (isAddingMarkers) {
+          setCustomMarkers((prev) => [
+            ...prev,
+            {
+              id: Date.now(),
+              lat: e.latlng.lat,
+              lng: e.latlng.lng,
+              index: prev.length % 19,
+            },
+          ])
+        }
+      },
+    })
+
+    // Set cursor style based on mode
+    useEffect(() => {
+      if (!map) return
+
+      const container = map.getContainer()
+      if (container) {
+        container.style.cursor = isAddingMarkers ? 'crosshair' : ''
+      }
+
+      return () => {
+        if (container) {
+          container.style.cursor = ''
+        }
+      }
+    }, [map, isAddingMarkers])
+
+    return null
+  }
+
+  // Add state for selected waypoint
+  const [selectedWaypointIndex, setSelectedWaypointIndex] = useState<
+    number | null
+  >(null)
+
   const handleDragEnd = useCallback(
     (index: number, { lat, lng }: { lat: number; lng: number }) =>
       handleWaypointsUpdate(
@@ -58,6 +152,15 @@ const DeploymentMap: React.FC<DeploymentMapProps> = ({
       ),
     [updatedWaypoints, handleWaypointsUpdate]
   )
+
+  // Add handler for waypoint clicks
+  const handleWaypointClick = useCallback(
+    (index: number) => {
+      setSelectedWaypointIndex(index === selectedWaypointIndex ? null : index)
+    },
+    [selectedWaypointIndex]
+  )
+
   const plottedWaypoints = updatedWaypoints.filter(
     (wp) => ![wp.lat?.toLowerCase(), wp.lon?.toLowerCase()].includes('nan')
   )
@@ -179,6 +282,13 @@ const DeploymentMap: React.FC<DeploymentMapProps> = ({
     calculatePathBounds()
   }, [calculatePathBounds])
 
+  const handleMarkerRequest = useCallback(() => {
+    // Implement the logic to handle marker requests here
+    // This could involve fetching marker data from an API or other data source
+    // For now, we'll just log a message to indicate the function was called
+    console.log('Marker request initiated')
+  }, [])
+
   const handleStationsRequest = useCallback(() => {
     setShowStations(true)
   }, [])
@@ -211,7 +321,34 @@ const DeploymentMap: React.FC<DeploymentMapProps> = ({
         onRequestPlatforms={handlePlatformsRequest}
         onRequestFitBounds={handleFitBoundsRequest}
         onRequestStations={handleStationsRequest}
+        // Add new props
+        onRequestMarkers={handleMarkerRequest}
+        // isAddingMarkers={isAddingMarkers} // Ensure MapProps is extended to include this
+        onToggleMarkerMode={handleToggleMarkerMode}
+        ref={(mapInstance) => {
+          mapRef.current = mapInstance
+        }}
       >
+        <MapClickHandler />
+        {/* <GoogleMapLayer /> */}
+        {/* Custom markers */}
+        {customMarkers.map((marker) => (
+          <DraggableMarker
+            key={marker.id}
+            id={marker.id}
+            position={[marker.lat, marker.lng]}
+            label={`Marker ${marker.id}`}
+            index={marker.index}
+            isSelected={false}
+            onDragEnd={(pos) => {
+              setCustomMarkers((prev) =>
+                prev.map((m) =>
+                  m.id === marker.id ? { ...m, lat: pos[0], lng: pos[1] } : m
+                )
+              )
+            }}
+          />
+        ))}
         {selectedStations.map((station) => {
           const lng = station.geojson.geometry.coordinates[0]
           const lat = station.geojson.geometry.coordinates[1]
@@ -230,18 +367,30 @@ const DeploymentMap: React.FC<DeploymentMapProps> = ({
           <>
             {plottedWaypoints.map((m, i) => {
               const index = Number(m.latName.match(/\d+/)?.[0] ?? i)
+              const isSelected = selectedWaypointIndex === i
+
               return (
                 <DraggableMarker
-                  lat={Number(m.lat)}
-                  lng={Number(m.lon)}
                   key={`${m.latName}-${m.lonName}-${m.lat}-${m.lon}`}
+                  id={i}
+                  position={[Number(m.lat), Number(m.lon)]}
+                  label={`Waypoint ${index}`}
                   index={index - 1}
+                  isSelected={isSelected}
                   draggable={editable && !focusedWaypointIndex}
-                  onDragEnd={handleDragEnd}
+                  onDragEnd={(pos) =>
+                    handleDragEnd(i, { lat: pos[0], lng: pos[1] })
+                  }
+                  onClick={() => handleWaypointClick(i)}
                 />
               )
             })}
-            {!!focusedWaypointIndex && <ClickableMapPoint />}
+            {!!focusedWaypointIndex && (
+              <ClickableMapPoint
+                lat={Number(plottedWaypoints[focusedWaypointIndex].lat)}
+                lng={Number(plottedWaypoints[focusedWaypointIndex].lon)}
+              />
+            )}
             <WaypointPreviewPath
               waypoints={plottedWaypoints.map((wp) => ({
                 lat: Number(wp.lat),
