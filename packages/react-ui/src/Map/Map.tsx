@@ -1,4 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react'
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useRef,
+  useImperativeHandle,
+} from 'react'
 import {
   TileLayer,
   MapContainer,
@@ -7,13 +14,14 @@ import {
   ScaleControl,
   useMapEvents,
 } from 'react-leaflet'
-import dynamic from 'next/dynamic'
 import 'leaflet.gridlayer.googlemutant'
 import ReactLeafletGoogleLayer from 'react-leaflet-google-layer'
 import Control from 'react-leaflet-custom-control'
+import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import 'leaflet-measure/dist/leaflet-measure.css'
 import '@mbari/react-ui/dist/mbari-ui.css'
+import '@mbari/react-ui/src/css/base.css'
 import Tippy from '@tippyjs/react'
 import 'tippy.js/dist/tippy.css'
 import MouseCoordinates, { MouseCoordinatesProps } from './MouseCoordinates'
@@ -32,6 +40,9 @@ import { Measurement } from './Measurement'
 import MovingDot from './MovingDot'
 import { AreaComponent, PathComponent, MeasurementProps } from './Measurement'
 import { CenterView } from './MapViews'
+import MapClickHandler from '../../../../apps/lrauv-dash2/components/MapClickHandler'
+import CustomMarkerSet from '../../../../apps/lrauv-dash2/components/CustomMarkerSet'
+import DraggableMarker from '../../../../apps/lrauv-dash2/components/DraggableMarker'
 import toast from 'react-hot-toast'
 
 const regex = /\B(?=(\d{3})+(?!\d))/g
@@ -95,7 +106,8 @@ const Map = React.forwardRef<L.Map, MapProps>(
     const mapRef = useRef<L.Map | null>(null)
     const [mapReady, setMapReady] = useState(false)
     const [isMeasuring, setIsMeasuring] = useState(false)
-    // const originalCenter = useRef(center)
+    const [isAddingMarkersLocal, setIsAddingMarkersLocal] =
+      useState(isAddingMarkers)
     const { baseLayer, setBaseLayer } = useMapBaseLayer()
     const addBaseLayerHandler = useCallback(
       (layer: BaseLayerOption) => () => {
@@ -307,7 +319,11 @@ const Map = React.forwardRef<L.Map, MapProps>(
         setCount(0)
         setMeasurements((prev) => [
           ...prev,
-          { id: Date.now().toLocaleString(), editing: true, showPopup: false },
+          {
+            id: Date.now().toLocaleString(),
+            editing: true,
+            showPopup: false,
+          },
         ])
       }
       if (mode === 'closed') {
@@ -327,12 +343,6 @@ const Map = React.forwardRef<L.Map, MapProps>(
       setMeasureMode(mode)
     }
 
-    const handleRequestCoordinate = (e: React.MouseEvent) => {
-      e.preventDefault()
-      e.stopPropagation()
-      onRequestCoordinate?.()
-    }
-
     const handleRequestFitBounds = (e: React.MouseEvent) => {
       e.preventDefault()
       e.stopPropagation()
@@ -345,17 +355,62 @@ const Map = React.forwardRef<L.Map, MapProps>(
       setVisibleDot('hidden')
     }
 
-    const handleToggleMarkerMode = (e: React.MouseEvent) => {
-      e.preventDefault()
-      e.stopPropagation()
-      onToggleMarkerMode?.()
-    }
+    const handleAddMarker = useCallback(
+      (lat: number, lng: number) => {
+        const newId = Date.now() // Generate unique ID
 
-    const handleMarkersClick = (e: React.MouseEvent) => {
-      e.preventDefault()
-      e.stopPropagation()
-      onRequestMarkers?.()
-    }
+        // Add the new marker to state
+        setMarkers((prev) => [
+          ...prev,
+          {
+            id: newId,
+            lat: lat,
+            lng: lng,
+            index: prev.length,
+            label: `Marker ${prev.length + 1}`,
+          },
+        ])
+
+        // Show success toast
+        toast.success(`Marker added at ${lat.toFixed(5)}, ${lng.toFixed(5)}`)
+
+        // Still call onRequestMarkers for any additional functionality
+        onRequestMarkers?.()
+
+        return newId
+      },
+      [onRequestMarkers]
+    )
+
+    const handleToggleMarkerMode = useCallback(
+      (e: React.MouseEvent) => {
+        e.preventDefault()
+        e.stopPropagation()
+        setIsAddingMarkersLocal((prev) => !prev)
+        onToggleMarkerMode?.()
+      },
+      [onToggleMarkerMode]
+    )
+
+    const handleMarkerDragEnd = useCallback(
+      (id: number, position: { lat: number; lng: number }) => {
+        // Update marker position in state
+        setMarkers((prev) =>
+          prev.map((marker) =>
+            marker.id === id
+              ? { ...marker, lat: position.lat, lng: position.lng }
+              : marker
+          )
+        )
+      },
+      []
+    )
+
+    // const handleMarkersClick = (e: React.MouseEvent) => {
+    //   e.preventDefault()
+    //   e.stopPropagation()
+    //   onRequestMarkers?.()
+    // }
 
     const handleLayersClick = (e: React.MouseEvent) => {
       e.preventDefault()
@@ -421,21 +476,33 @@ const Map = React.forwardRef<L.Map, MapProps>(
             viewMode={viewMode} // Pass this through
           />
         )}
-        {/* {markers.map((marker) => (
+        <MapClickHandler
+          isAddingMarkers={isAddingMarkersLocal}
+          isEditingMarker={false} // Or your original value
+          onAddMarker={handleAddMarker}
+        />
+
+        <CustomMarkerSet
+          isAddingMarkers={isAddingMarkersLocal}
+          setIsAddingMarkers={setIsAddingMarkersLocal}
+        />
+        {markers.map((marker) => (
           <DraggableMarker
             key={`marker-${marker.id}`}
-            lat={marker.lat}
-            lng={marker.lng}
+            id={marker.id.toString()}
+            position={[marker.lat, marker.lng]}
             index={marker.index}
+            label={marker.label}
             draggable={true}
-            onDragEnd={(_, latlng) => handleMarkerDragEnd(marker.id, latlng)}
-            tooltipContent={marker.label}
-            zIndexOffset={100}
+            onDragEnd={(pos) =>
+              handleMarkerDragEnd(marker.id, { lat: pos[0], lng: pos[1] })
+            }
             onClick={() => {
-              toast(`Marker clicked: ${marker.id}`)
+              // Select the marker
+              toast(`Marker clicked: ${marker.label}`)
             }}
           />
-        ))} */}
+        ))}
         <ScaleControl position="topright" />
         <LayersControl position="topright">
           {mapReady && (
@@ -572,7 +639,7 @@ const Map = React.forwardRef<L.Map, MapProps>(
                       width: 42,
                       height: 42,
                     }}
-                    onClick={handleRequestCoordinate}
+                    onClick={onRequestCoordinate}
                   >
                     <FontAwesomeIcon
                       icon={faArrowsToCircle}
@@ -668,7 +735,6 @@ const Map = React.forwardRef<L.Map, MapProps>(
               <MovingDot editing={m.editing} />
             </React.Fragment>
           ))}
-
           {/* Measurement mode: OPEN */}
           {measureMode === 'open' ? (
             <div
@@ -719,7 +785,6 @@ const Map = React.forwardRef<L.Map, MapProps>(
               </p>
             </div>
           ) : null}
-
           {/* Measurement mode: MEASURING */}
           {measureMode === 'measuring' ? (
             <div

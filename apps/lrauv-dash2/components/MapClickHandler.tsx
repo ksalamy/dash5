@@ -5,20 +5,24 @@ import toast from 'react-hot-toast'
 
 interface MapClickHandlerProps {
   isAddingMarkers: boolean
+  isEditingMarker?: boolean
   onAddMarker: (lat: number, lng: number) => void
 }
-
+/// Function to handle map clicks and add markers
 const MapClickHandler: React.FC<MapClickHandlerProps> = ({
   isAddingMarkers,
+  isEditingMarker = false,
   onAddMarker,
 }) => {
-  // Use a ref to track the latest value and avoid stale closures
+  // Use refs to track the latest values
   const isAddingMarkersRef = useRef(isAddingMarkers)
+  const isEditingMarkerRef = useRef(isEditingMarker)
 
   // Update the ref when the prop changes
   useEffect(() => {
     isAddingMarkersRef.current = isAddingMarkers
-  }, [isAddingMarkers])
+    isEditingMarkerRef.current = isEditingMarker
+  }, [isAddingMarkers, isEditingMarker])
 
   // Track click targets to avoid adding markers when clicking controls
   const clickTargetRef = useRef<EventTarget | null>(null)
@@ -38,15 +42,27 @@ const MapClickHandler: React.FC<MapClickHandlerProps> = ({
 
   // Use Leaflet's map events
   const map = useMapEvents({
+    mousedown: (e) => {
+      // Save the initial target element
+      clickTargetRef.current = e.originalEvent.target as HTMLElement
+    },
+
     click: (e) => {
       // First check if we're in marker adding mode
       if (!isAddingMarkersRef.current) return
+
+      // Don't add markers if we're currently editing a marker
+      if (isEditingMarkerRef.current) {
+        console.log('Marker is being edited, not adding new marker')
+        toast('Please finish editing current marker first')
+        return
+      }
 
       // Get the original DOM event target
       const target = e.originalEvent.target as HTMLElement
       const initialTarget = clickTargetRef.current as HTMLElement
 
-      // Check if click started or ended on a control
+      // Check if click started or ended on a control - Allows for clicking
       const isControlClick =
         target.closest('.leaflet-control') ||
         (initialTarget && initialTarget.closest('.leaflet-control')) ||
@@ -62,15 +78,7 @@ const MapClickHandler: React.FC<MapClickHandlerProps> = ({
         return
       }
 
-      // Add marker when clicking map
       onAddMarker(e.latlng.lat, e.latlng.lng)
-
-      // Optional: Show toast notification
-      toast.success(
-        `Marker added at (${e.latlng.lat.toFixed(5)}, ${e.latlng.lng.toFixed(
-          5
-        )})`
-      )
     },
   })
 

@@ -6,7 +6,8 @@ import { useGoogleElevator } from '../lib/useGoogleElevator'
 import { VPosDetail } from '@mbari/api-client'
 import { StationsListModal } from './StationsListModal'
 import { useSelectedStations } from './SelectedStationContext'
-import { useMapEvents } from 'react-leaflet'
+import MapClickHandler from './MapClickHandler'
+import toast from 'react-hot-toast'
 import 'leaflet.gridlayer.googlemutant'
 
 // This is a tricky workaround to prevent leaflet from crashing next.js
@@ -21,12 +22,6 @@ const DraggableMarker = dynamic(() => import('./DraggableMarker'), {
 const ClickableMapPoint = dynamic(() => import('./ClickableMapPoint'), {
   ssr: false,
 })
-// const GoogleMapLayer = dynamic(
-//   () => import('@mbari/react-ui/dist/Map/maLayer'),
-//   {
-//     ssr: false,
-//   }
-// )
 const VehiclePath = dynamic(() => import('./VehiclePath'), {
   ssr: false,
 })
@@ -43,11 +38,6 @@ interface DeploymentMapProps {
   onScrub?: (time?: number | null) => void
   startTime?: number | null
   endTime?: number | null
-}
-// Type assertion to ensure MapProps has the expected properties
-type CustomMapProps = MapProps & {
-  isAddingMarkers?: boolean
-  onToggleMarkerMode?: () => void
 }
 
 const DeploymentMap: React.FC<DeploymentMapProps> = ({
@@ -66,12 +56,25 @@ const DeploymentMap: React.FC<DeploymentMapProps> = ({
 
   // Add state for marker mode
   const [isAddingMarkers, setIsAddingMarkers] = useState(false)
+  const [newMarkerId, setNewMarkerId] = useState<number | null>(null)
+  const { handleDepthRequest } = useGoogleElevator()
+  const [center, setCenter] = useState<undefined | [number, number]>()
+  const [centerZoom, setCenterZoom] = useState<number | undefined>(undefined)
+  const [bounds, setBounds] = useState<
+    [[number, number], [number, number]] | undefined
+  >()
+  const [latestGPS, setLatestGPS] = useState<VPosDetail | undefined>()
+  const [viewMode, setViewMode] = useState<'center' | 'bounds' | null>(null)
+  const [showStations, setShowStations] = useState(false)
+  const { selectedStations } = useSelectedStations()
   const [customMarkers, setCustomMarkers] = useState<
     Array<{
       id: number
       lat: number
       lng: number
       index: number
+      label?: string
+      iconColor?: string
     }>
   >([])
 
@@ -82,17 +85,27 @@ const DeploymentMap: React.FC<DeploymentMapProps> = ({
 
   // Handler for adding markers when map is clicked
   const handleAddMarker = useCallback(
-    (e: L.LeafletMouseEvent) => {
+    (lat: number, lng: number) => {
       if (isAddingMarkers) {
+        const newId = Date.now()
+
         setCustomMarkers((prev) => [
           ...prev,
           {
-            id: Date.now(),
-            lat: e.latlng.lat,
-            lng: e.latlng.lng,
-            index: prev.length % 19, // Cycle through icon styles
+            id: newId,
+            lat: lat,
+            lng: lng,
+            index: prev.length % 19,
+            label: `Marker ${prev.length + 1}`,
+            iconColor: '#E53935',
           },
         ])
+
+        // Set as new marker and clear after delay
+        setNewMarkerId(newId)
+        setTimeout(() => setNewMarkerId(null), 300)
+
+        return newId
       }
     },
     [isAddingMarkers]
@@ -100,43 +113,6 @@ const DeploymentMap: React.FC<DeploymentMapProps> = ({
 
   // Reference to the map instance
   const mapRef = useRef<L.Map | null>(null)
-
-  // Set up click handler when marker mode changes
-  const MapClickHandler = () => {
-    const map = useMapEvents({
-      click: (e) => {
-        if (isAddingMarkers) {
-          setCustomMarkers((prev) => [
-            ...prev,
-            {
-              id: Date.now(),
-              lat: e.latlng.lat,
-              lng: e.latlng.lng,
-              index: prev.length % 19,
-            },
-          ])
-        }
-      },
-    })
-
-    // Set cursor style based on mode
-    useEffect(() => {
-      if (!map) return
-
-      const container = map.getContainer()
-      if (container) {
-        container.style.cursor = isAddingMarkers ? 'crosshair' : ''
-      }
-
-      return () => {
-        if (container) {
-          container.style.cursor = ''
-        }
-      }
-    }, [map, isAddingMarkers])
-
-    return null
-  }
 
   // Add state for selected waypoint
   const [selectedWaypointIndex, setSelectedWaypointIndex] = useState<
@@ -161,21 +137,12 @@ const DeploymentMap: React.FC<DeploymentMapProps> = ({
     [selectedWaypointIndex]
   )
 
+  // Filter out NaN waypoints
   const plottedWaypoints = updatedWaypoints.filter(
     (wp) => ![wp.lat?.toLowerCase(), wp.lon?.toLowerCase()].includes('nan')
   )
 
-  const { handleDepthRequest } = useGoogleElevator()
-  const [center, setCenter] = useState<undefined | [number, number]>()
-  const [centerZoom, setCenterZoom] = useState<number | undefined>(undefined)
-  const [bounds, setBounds] = useState<
-    [[number, number], [number, number]] | undefined
-  >()
-  const [latestGPS, setLatestGPS] = useState<VPosDetail | undefined>()
-  const [viewMode, setViewMode] = useState<'center' | 'bounds' | null>(null)
-  const [showStations, setShowStations] = useState(false)
-  const { selectedStations } = useSelectedStations()
-
+  //  Track the latest vehicle name to reset state when it changes
   const latestVehicle = useRef(vehicleName)
   useEffect(() => {
     if (vehicleName !== latestVehicle.current) {
@@ -185,6 +152,7 @@ const DeploymentMap: React.FC<DeploymentMapProps> = ({
     }
   }, [vehicleName, setLatestGPS])
 
+  // Update the map center when latestGPS changes
   useEffect(() => {
     if (!latestGPS?.latitude || !latestGPS?.longitude) return
 
@@ -197,11 +165,56 @@ const DeploymentMap: React.FC<DeploymentMapProps> = ({
     }
   }, [latestGPS]) // Intentionally omitting center from dependencies to avoid infinite loop
 
+  // Load markers from localStorage on mount
+  useEffect(() => {
+    const savedMarkers = localStorage.getItem('deploymentMapMarkers')
+    if (savedMarkers) {
+      try {
+        setCustomMarkers(JSON.parse(savedMarkers))
+      } catch (e) {
+        toast.error(
+          `Failed to load saved markers: ${(e as Error)?.message || e}`
+        )
+      }
+    }
+  }, [])
+
+  // Save markers when they change
+  useEffect(() => {
+    toast(`Saving markers to localStorage: ${customMarkers.length}`)
+    if (customMarkers.length > 0) {
+      localStorage.setItem(
+        'deploymentMapMarkers',
+        JSON.stringify(customMarkers)
+      )
+    } else {
+      localStorage.removeItem('deploymentMapMarkers')
+    }
+  }, [customMarkers])
+
+  // TODO: Add functionality if needed, forcefully remove all markers
+  const forceRemoveAllMarkers = useCallback(() => {
+    // Clear all markers from state
+    setCustomMarkers([])
+
+    // Clear localStorage
+    localStorage.removeItem('deploymentMapMarkers')
+
+    // Force refresh map if needed
+    if (mapRef.current) {
+      setTimeout(() => {
+        mapRef.current?.invalidateSize()
+      }, 100)
+    }
+
+    toast('All markers forcefully removed')
+  }, [])
+
   // Store positions of all vehicles to calculate center
   const vehiclePosition = useRef<Array<[number, number]>>([])
   // Track vehicle path points for bounds calculation
   const pathPoints = useRef<Array<[number, number]>>([])
-
+  // Handler for GPS fix updates
   const handleGPSFix = useCallback(
     (gps: VPosDetail) => {
       // Reset the array if this is a different vehicle
@@ -227,7 +240,7 @@ const DeploymentMap: React.FC<DeploymentMapProps> = ({
   // Calculate bounds for the entire vehicle path
   const calculatePathBounds = useCallback(() => {
     if (pathPoints.current.length === 0) {
-      console.warn('No path points available for bounds calculation')
+      toast('No path points available for bounds calculation')
       return
     }
 
@@ -257,6 +270,7 @@ const DeploymentMap: React.FC<DeploymentMapProps> = ({
     setViewMode('bounds')
   }, [])
 
+  // Handler for depth request
   const handleCoordinateRequest = useCallback(() => {
     if (latestGPS) {
       setCenter([latestGPS.latitude, latestGPS.longitude])
@@ -272,7 +286,7 @@ const DeploymentMap: React.FC<DeploymentMapProps> = ({
         setBounds(undefined)
         setViewMode('center')
       } else {
-        console.warn('DeploymentMap - No position available to center on')
+        toast('DeploymentMap - No position available to center on')
       }
     }
   }, [latestGPS])
@@ -282,26 +296,54 @@ const DeploymentMap: React.FC<DeploymentMapProps> = ({
     calculatePathBounds()
   }, [calculatePathBounds])
 
+  //  Handler for requesting stations
   const handleMarkerRequest = useCallback(() => {
-    // Implement the logic to handle marker requests here
+    // TODO: Implement the logic to handle marker requests here
     // This could involve fetching marker data from an API or other data source
-    // For now, we'll just log a message to indicate the function was called
-    console.log('Marker request initiated')
+    // For now, logging a message to indicate the function was called
+    toast('Marker request initiated')
   }, [])
 
+  // Handler for editing marker labels
+  const handleEditMarkerLabel = useCallback((id: string, newLabel: string) => {
+    toast(`Editing marker ${id} label to: ${newLabel}`)
+
+    setCustomMarkers((prev) =>
+      prev.map((marker) =>
+        marker.id.toString() === id ? { ...marker, label: newLabel } : marker
+      )
+    )
+  }, [])
+
+  // Handler for changing marker color
+  const handleColorChange = useCallback((id: string, newColor: string) => {
+    toast(`Changing marker ${id} color to: ${newColor}`)
+
+    setCustomMarkers((prev) =>
+      prev.map((marker) =>
+        marker.id.toString() === id
+          ? { ...marker, iconColor: newColor }
+          : marker
+      )
+    )
+  }, [])
+
+  // Handler for requesting stations
   const handleStationsRequest = useCallback(() => {
     setShowStations(true)
   }, [])
 
+  //  Handler for closing the stations modal
   const handleCloseStations = useCallback(() => {
     setShowStations(false)
   }, [])
 
+  //  TODO: Handler for requesting platforms - placeholder
   const handlePlatformsRequest = useCallback(() => {
-    console.log('Platforms request initiated')
-    // Implement the logic to handle platform requests here
+    toast('Platforms request initiated')
+    // TODO: Implement the logic to handle platform requests here
     // This could involve fetching platform data from an API or other data source
-    // For now, we'll just log a message to indicate the function was called
+    // For now, logging a message to indicate the function was called
   }, [])
 
   return (
@@ -321,31 +363,75 @@ const DeploymentMap: React.FC<DeploymentMapProps> = ({
         onRequestPlatforms={handlePlatformsRequest}
         onRequestFitBounds={handleFitBoundsRequest}
         onRequestStations={handleStationsRequest}
-        // Add new props
         onRequestMarkers={handleMarkerRequest}
-        // isAddingMarkers={isAddingMarkers} // Ensure MapProps is extended to include this
+        isAddingMarkers={isAddingMarkers}
         onToggleMarkerMode={handleToggleMarkerMode}
         ref={(mapInstance) => {
           mapRef.current = mapInstance
         }}
       >
-        <MapClickHandler />
-        {/* <GoogleMapLayer /> */}
-        {/* Custom markers */}
+        <MapClickHandler
+          isAddingMarkers={isAddingMarkers}
+          isEditingMarker={false}
+          onAddMarker={handleAddMarker}
+        />
         {customMarkers.map((marker) => (
           <DraggableMarker
-            key={marker.id}
-            id={marker.id}
+            key={`marker-${marker.id}-${marker.lat.toFixed(
+              5
+            )}-${marker.lng.toFixed(5)}`}
+            id={String(marker.id)}
             position={[marker.lat, marker.lng]}
-            label={`Marker ${marker.id}`}
+            label={marker.label || `Marker ${marker.id}`}
             index={marker.index}
             isSelected={false}
+            isNew={marker.id === newMarkerId}
+            iconColor={marker.iconColor || '#E53935'}
             onDragEnd={(pos) => {
+              // Preserve ALL properties, not just update position
               setCustomMarkers((prev) =>
                 prev.map((m) =>
-                  m.id === marker.id ? { ...m, lat: pos[0], lng: pos[1] } : m
+                  m.id === marker.id
+                    ? {
+                        ...m, // Keep all existing properties (including iconColor)
+                        lat: pos[0],
+                        lng: pos[1],
+                      }
+                    : m
                 )
               )
+            }}
+            onEdit={(newLabel) =>
+              handleEditMarkerLabel(String(marker.id), newLabel)
+            }
+            onColorChange={(newColor) =>
+              handleColorChange(String(marker.id), newColor)
+            }
+            onDelete={() => {
+              // Log the marker being deleted
+              toast(`Attempting to delete marker with ID: ${marker.id}`)
+
+              // Explicitly convert IDs to same type when comparing
+              setCustomMarkers((prev) => {
+                const newMarkers = prev.filter((m) => m.id !== marker.id)
+                toast(`Markers remaining after deletion: ${newMarkers.length}`)
+                return newMarkers
+              })
+
+              // Force an update to localStorage immediately
+              setTimeout(() => {
+                const remaining = customMarkers.filter(
+                  (m) => m.id !== marker.id
+                )
+                if (remaining.length > 0) {
+                  localStorage.setItem(
+                    'deploymentMapMarkers',
+                    JSON.stringify(remaining)
+                  )
+                } else {
+                  localStorage.removeItem('deploymentMapMarkers')
+                }
+              }, 0)
             }}
           />
         ))}
@@ -372,7 +458,7 @@ const DeploymentMap: React.FC<DeploymentMapProps> = ({
               return (
                 <DraggableMarker
                   key={`${m.latName}-${m.lonName}-${m.lat}-${m.lon}`}
-                  id={i}
+                  id={String(i)}
                   position={[Number(m.lat), Number(m.lon)]}
                   label={`Waypoint ${index}`}
                   index={index - 1}

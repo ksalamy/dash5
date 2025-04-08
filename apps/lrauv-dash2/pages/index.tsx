@@ -16,12 +16,10 @@ import { Allotment, LayoutPriority } from 'allotment'
 import { useGoogleMaps } from '../lib/useGoogleMaps'
 import { VPosDetail } from '@mbari/api-client'
 import 'allotment/dist/style.css'
-import toast, { useToaster } from 'react-hot-toast'
+import toast from 'react-hot-toast'
 import { StationsListModal } from '../components/StationsListModal'
 import { useSelectedStations } from '../components/SelectedStationContext'
 import type { MapProps } from '@mbari/react-ui/dist/Map/Map'
-// import { CustomMarker } from '../components/CustomMarker'
-import { useMap } from 'react-leaflet'
 
 // This is a tricky workaround to prevent leaflet from crashing next.js
 // SSR. If we don't do this, the leaflet map will be loaded server side
@@ -45,11 +43,6 @@ const DraggableMarker = dynamic(() => import('../components/DraggableMarker'), {
 const CustomMarkerSet = dynamic(() => import('../components/CustomMarkerSet'), {
   ssr: false,
 })
-
-const ClickableMapPoint = dynamic(
-  () => import('../components/ClickableMapPoint'),
-  { ssr: false }
-)
 // TODO: Set up Draggable Marker and ClickableMapPoint
 
 const styles = {
@@ -59,171 +52,15 @@ const styles = {
   secondary:
     'flex w-full flex-shrink-0 flex-col bg-white border-t-2 border-secondary-300/60',
 }
+
+// interface CustomMarkerProps {
 type CustomMapProps = MapProps &
   React.RefAttributes<L.Map> & {
     isAddingMarkers?: boolean
     onToggleMarkerMode?: () => void
   }
 
-// interface CustomMarkerSetProps {
-//   isAddingMarkers: boolean
-//   setIsAddingMarkers: React.Dispatch<React.SetStateAction<boolean>>
-// }
-
-// interface MarkerData {
-//   id: number
-//   lat: number
-//   lng: number
-//   index: number
-//   label: string
-// }
-
-// interface ClickablePointData {
-//   id: number
-//   lat: number
-//   lng: number
-// }
-
-// const CustomMarkerSet: React.FC<CustomMarkerSetProps> = ({
-//   isAddingMarkers,
-//   setIsAddingMarkers,
-// }) => {
-//   console.log('CustomMarkerSet rendered', { isAddingMarkers })
-//   const [clickablePoints, setClickablePoints] = useState<ClickablePointData[]>(
-//     []
-//   )
-//   const [selectedMarkerId, setSelectedMarkerId] = useState<number | null>(null)
-//   const [markers, setMarkers] = useState<MarkerData[]>([])
-//   console.log('Markers:', markers)
-//   console.log('Clickable points:', clickablePoints)
-//   // Get access to the Leaflet map instance
-//   const map = useMap()
-
-//   const handleAddMarker = useCallback(
-//     (latlng: { lat: number; lng: number }) => {
-//       const newMarkerId = Date.now() + Math.random()
-//       setMarkers((prev) => [
-//         ...prev,
-//         {
-//           id: newMarkerId,
-//           lat: latlng.lat,
-//           lng: latlng.lng,
-//           index: prev.length % 19,
-//           label: `Marker ${prev.length + 1}`,
-//         },
-//       ])
-//       return newMarkerId
-//     },
-//     []
-//   )
-//   const handleAddClickablePoint = useCallback(
-//     (latlng: { lat: number; lng: number }) => {
-//       setClickablePoints((prev) => [
-//         ...prev,
-//         {
-//           id: Date.now() + Math.random(),
-//           lat: latlng.lat,
-//           lng: latlng.lng,
-//         },
-//       ])
-//     },
-//     []
-//   )
-
-//   const handleMarkerDragEnd = useCallback(
-//     (id: number, latlng: { lat: number; lng: number }) => {
-//       setMarkers((prev) =>
-//         prev.map((marker) =>
-//           marker.id === id
-//             ? { ...marker, lat: latlng.lat, lng: latlng.lng }
-//             : marker
-//         )
-//       )
-//       toast.success(
-//         `Marker moved to (${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)})`
-//       )
-//     },
-//     []
-//   )
-
-//   const handleMarkerClick = useCallback((id: number) => {
-//     setSelectedMarkerId(id)
-//   }, [])
-
-//   const handleEditMarkerLabel = useCallback((id: number, newLabel: string) => {
-//     setMarkers((prev) =>
-//       prev.map((marker) =>
-//         marker.id === id ? { ...marker, label: newLabel } : marker
-//       )
-//     )
-//     toast.success(`Marker renamed to "${newLabel}"`)
-//   }, [])
-
-//   const handleDeleteMarker = useCallback((id: number) => {
-//     setMarkers((prev) => prev.filter((marker) => marker.id !== id))
-//     toast.success('Marker deleted')
-//     setSelectedMarkerId(null)
-//   }, [])
-
-//   useEffect(() => {
-//     if (!map) return
-
-//     const handleMapClick = (e: L.LeafletMouseEvent) => {
-//       if (isAddingMarkers) {
-//         const newMarkerId = handleAddMarker({
-//           lat: e.latlng.lat,
-//           lng: e.latlng.lng,
-//         })
-//         setSelectedMarkerId(newMarkerId)
-//         toast.success(
-//           `Marker added at (${e.latlng.lat.toFixed(5)}, ${e.latlng.lng.toFixed(
-//             5
-//           )})`
-//         )
-//       }
-//     }
-
-//     if (isAddingMarkers) {
-//       map.on('click', handleMapClick)
-//       map.getContainer().style.cursor = 'crosshair'
-//       toast('Click on the map to add markers')
-//     } else {
-//       map.off('click', handleMapClick)
-//       map.getContainer().style.cursor = ''
-//     }
-
-//     return () => {
-//       map.off('click', handleMapClick)
-//       map.getContainer().style.cursor = ''
-//     }
-//   }, [isAddingMarkers, handleAddMarker, map])
-
-//   return (
-//     <>
-//       {markers.map((marker) => (
-//         <DraggableMarker
-//           key={marker.id}
-//           id={marker.id}
-//           position={[marker.lat, marker.lng]}
-//           label={marker.label}
-//           index={marker.index}
-//           isSelected={selectedMarkerId === marker.id}
-//           onDragEnd={(pos) =>
-//             handleMarkerDragEnd(marker.id, { lat: pos[0], lng: pos[1] })
-//           }
-//           onClick={() => handleMarkerClick(marker.id)}
-//           onEdit={(newLabel) => handleEditMarkerLabel(marker.id, newLabel)}
-//           onDelete={() => handleDeleteMarker(marker.id)}
-//         />
-//       ))}
-//     </>
-//   )
-// }
-
-// export default CustomMarkerSet
-
-////////////////   OVERVIEWMAP   //////////////////////
-//////////////////////////////////////////////////////
+// OverviewMap component
 const OverViewMap: React.FC<{
   trackedVehicles: string[]
 }> = ({ trackedVehicles }) => {
@@ -251,6 +88,7 @@ const OverViewMap: React.FC<{
   // Store all vehicle positions for bounds calculation
   const vehiclePositions = useRef<Array<[number, number]>>([])
 
+  // Effect to set the map reference
   useEffect(() => {
     // Reset positions when component unmounts or tracked vehicles change
     return () => {
@@ -258,6 +96,7 @@ const OverViewMap: React.FC<{
     }
   }, [trackedVehicles])
 
+  // Effect to handle map reference
   const handleGPSFix = useCallback(
     (gps: VPosDetail) => {
       if ((latestGPS?.isoTime ?? 0) > gps.isoTime || !latestGPS) {
@@ -273,8 +112,10 @@ const OverViewMap: React.FC<{
     [latestGPS, setLatestGPS]
   )
 
+  // Effect to handle map events
   const calculateBounds = useCallback(() => {
     if (vehiclePositions.current.length === 0) {
+      // console.warn('No vehicle positions available for bounds calculation')
       // console.warn('No vehicle positions available for bounds calculation')
       return
     }
@@ -299,6 +140,7 @@ const OverViewMap: React.FC<{
     setBounds(newBounds)
   }, [])
 
+  // Effect to handle map bounds
   const handleCoordinateRequest = useCallback(() => {
     if (latestGPS) {
       setCenter([latestGPS.latitude, latestGPS.longitude])
@@ -308,24 +150,30 @@ const OverViewMap: React.FC<{
     }
   }, [latestGPS])
 
+  // Effect to handle map bounds
   const handleFitBoundsRequest = useCallback(() => {
     calculateBounds()
+    setCenter(undefined)
     setCenter(undefined)
     setViewMode('bounds')
   }, [calculateBounds])
 
+  // Effect to handle map bounds
   const handleMarkersRequest = useCallback(() => {
     console.log('Markers requested')
   }, [])
 
+  // Effect to handle map bounds
   const handleStationsRequest = useCallback(() => {
     setShowStations(true)
   }, [setShowStations])
 
+  // Effect to handle map bounds
   const handleCloseStations = useCallback(() => {
     setShowStations(false)
   }, [setShowStations])
 
+  // Effect to handle map bounds
   const handleToggleMarkerMode = useCallback(() => {
     setIsAddingMarkers((prev) => {
       const newValue = !prev
@@ -334,6 +182,7 @@ const OverViewMap: React.FC<{
     })
   }, [])
 
+  // Effect to handle map bounds
   useEffect(() => {
     console.log('mapRef.current in OverViewMap:', mapRef.current)
   }, [mapRef])
@@ -395,6 +244,7 @@ const OverViewMap: React.FC<{
   )
 }
 
+// OverviewPage: NextPage
 const OverviewPage: NextPage = () => {
   const { mapsLoaded } = useGoogleMaps()
   const router = useRouter()

@@ -56,6 +56,7 @@ export const SelectedStationsProvider: React.FC<{
     return []
   })
 
+  // Create a unique ID for this provider instance
   const providerId = useRef(
     `provider-${Date.now()}-${++instanceCounter}`
   ).current
@@ -142,18 +143,6 @@ export const SelectedStationsProvider: React.FC<{
       console.log(`🔴 SelectedStationsProvider (${providerId}) - Unmounted`)
     }
   }, [providerId, selectedStations])
-
-  // Track state changes
-  // useEffect(() => {
-  //   console.group(`🔄 SelectedStationsProvider (${providerId}) - State Updated`)
-  //   console.log('Current stations:', selectedStations)
-  //   console.log('Station count:', selectedStations.length)
-  //   console.log(
-  //     'Station names:',
-  //     selectedStations.map((s) => s.name)
-  //   )
-  //   console.groupEnd()
-  // }, [selectedStations, providerId])
 
   const toggleStation = (station: Station) => {
     console.group(`🔧 toggleStation called in provider (${providerId})`)

@@ -1,162 +1,274 @@
 import React, { useCallback, useEffect, useState, useRef } from 'react'
-import { useMap } from 'react-leaflet'
+import { useMap, useMapEvents } from 'react-leaflet'
 import toast from 'react-hot-toast'
 import DraggableMarker from './DraggableMarker'
-import ClickableMapPoint from './ClickableMapPoint'
 import MapClickHandler from './MapClickHandler'
 
 interface CustomMarkerSetProps {
   isAddingMarkers: boolean
-  setIsAddingMarkers: React.Dispatch<React.SetStateAction<boolean>>
+  setIsAddingMarkers: (adding: boolean) => void
 }
-
 interface MarkerData {
   id: number
   lat: number
   lng: number
   index: number
   label: string
-  iconName?: 'mapMarker' | 'mapMarkerAlt' | 'locationDot' | 'locationPin'
+  iconName?: string
   iconColor?: string
-}
-
-interface ClickablePointData {
-  id: number
-  lat: number
-  lng: number
 }
 
 const CustomMarkerSet: React.FC<CustomMarkerSetProps> = ({
   isAddingMarkers,
   setIsAddingMarkers,
 }) => {
-  const [markers, setMarkers] = useState<MarkerData[]>([])
-  const [clickablePoints, setClickablePoints] = useState<ClickablePointData[]>(
-    []
-  )
-  const [selectedMarkerId, setSelectedMarkerId] = useState<number | null>(null)
-
-  // Get access to the Leaflet map instance
   const map = useMap()
+  const [markers, setMarkers] = useState<
+    Array<{
+      id: number
+      lat: number
+      lng: number
+      label: string
+      index: number
+      iconColor: string
+    }>
+  >([])
 
+  const [selectedMarkerId, setSelectedMarkerId] = useState<number | null>(null)
+  const [isAnyMarkerEditing, setIsAnyMarkerEditing] = useState(false)
+  const [newMarkerId, setNewMarkerId] = useState<number | null>(null)
+
+  // Add a handler to track marker edit status
+  const handleMarkerEditStateChange = useCallback(
+    (id: number, isEditing: boolean) => {
+      setIsAnyMarkerEditing(isEditing)
+    },
+    []
+  )
+  // Color options for markers
+  const colorOptions = [
+    '#E53935',
+    '#D81B60',
+    '#8E24AA',
+    '#5E35B1',
+    '#3949AB',
+    '#1E88E5',
+    '#039BE5',
+    '#00ACC1',
+    '#00897B',
+    '#43A047',
+    '#7CB342',
+    '#C0CA33',
+    '#FDD835',
+    '#FFB300',
+    '#FB8C00',
+  ]
+
+  // Load markers from localStorage on mount
+  useEffect(() => {
+    const savedMarkers = localStorage.getItem('mapMarkers')
+    if (savedMarkers) {
+      try {
+        setMarkers(JSON.parse(savedMarkers))
+      } catch (e) {
+        toast.error(`Failed to load saved markers: ${(e as Error).message}`)
+      }
+    }
+  }, [])
+
+  // Save markers when they change
+  useEffect(() => {
+    if (markers.length > 0) {
+      localStorage.setItem('mapMarkers', JSON.stringify(markers))
+    }
+  }, [markers])
+
+  // Simple function to add a marker
   const handleAddMarker = useCallback(
-    (latlng: { lat: number; lng: number }) => {
-      const newMarkerId = Date.now() + Math.random()
-      setMarkers((prev) => [
-        ...prev,
-        {
-          id: newMarkerId,
-          lat: latlng.lat,
-          lng: latlng.lng,
-          index: prev.length % 19,
-          label: `Marker ${prev.length + 1}`,
-        },
-      ])
-      return newMarkerId
+    (lat: number, lng: number) => {
+      if (isAddingMarkers) {
+        const newId = Date.now()
+
+        setMarkers((prev) => [
+          ...prev,
+          {
+            id: newId,
+            lat: lat,
+            lng: lng,
+            index: prev.length,
+            label: `Marker ${prev.length + 1}`,
+            iconColor: '#E53935', // Default color
+          },
+        ])
+
+        // Set this as the new marker ID
+        setNewMarkerId(newId)
+
+        // Clear the new marker ID after a short delay
+        setTimeout(() => {
+          setNewMarkerId(null)
+        }, 300)
+
+        toast.success('Marker added')
+        return newId
+      }
     },
-    []
+    [isAddingMarkers]
   )
 
-  const handleAddClickablePoint = useCallback(
-    (latlng: { lat: number; lng: number }) => {
-      setClickablePoints((prev) => [
-        ...prev,
-        {
-          id: Date.now() + Math.random(),
-          lat: latlng.lat,
-          lng: latlng.lng,
-        },
-      ])
-    },
-    []
-  )
-
+  // Handle marker drag
   const handleMarkerDragEnd = useCallback(
-    (id: number, latlng: { lat: number; lng: number }) => {
+    (id: number, position: { lat: number; lng: number }) => {
+      // Find the current marker to get its label
+      const marker = markers.find((m) => m.id.toString() === id.toString())
+      const label = marker?.label || 'Marker'
+
+      // Update marker position
       setMarkers((prev) =>
         prev.map((marker) =>
           marker.id === id
-            ? { ...marker, lat: latlng.lat, lng: latlng.lng }
+            ? { ...marker, lat: position.lat, lng: position.lng }
             : marker
         )
       )
+
+      // Display toast notification with formatted coordinates
       toast.success(
-        `Marker moved to (${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)})`
+        `${label} moved to (${position.lat.toFixed(5)}, ${position.lng.toFixed(
+          5
+        )})`,
+        {
+          duration: 2000,
+          style: {
+            border: '1px solid #1E3A8A',
+            padding: '16px',
+            color: '#1E3A8A',
+          },
+          iconTheme: {
+            primary: '#1E3A8A',
+            secondary: '#FFFAEE',
+          },
+        }
       )
     },
-    []
+    [markers]
   )
 
-  const handleMarkerClick = useCallback((id: number) => {
-    setSelectedMarkerId(id)
-  }, [])
+  // Handle marker click
+  const handleMarkerClick = useCallback(
+    (id: number) => {
+      setSelectedMarkerId(id === selectedMarkerId ? null : id)
+    },
+    [selectedMarkerId]
+  )
 
-  const handleEditMarkerLabel = useCallback((id: number, newLabel: string) => {
+  // Handle editing the marker label
+  const handleEditMarkerLabel = useCallback((id: string, newLabel: string) => {
+    toast(`Editing marker ${id} label to: ${newLabel}`)
+
     setMarkers((prev) =>
       prev.map((marker) =>
-        marker.id === id ? { ...marker, label: newLabel } : marker
+        marker.id.toString() === id ? { ...marker, label: newLabel } : marker
       )
     )
-    toast.success(`Marker renamed to "${newLabel}"`)
   }, [])
 
-  const handleDeleteMarker = useCallback((id: number) => {
-    setMarkers((prev) => prev.filter((marker) => marker.id !== id))
-    toast.success('Marker deleted')
-    setSelectedMarkerId(null)
+  // Handle changing marker color
+  const handleColorChange = useCallback((id: number, newColor: string) => {
+    setMarkers((prev) =>
+      prev.map((marker) =>
+        marker.id === id ? { ...marker, iconColor: newColor } : marker
+      )
+    )
   }, [])
 
+  // Handle deleting a marker
+  const handleDeleteMarker = useCallback(
+    (id: number) => {
+      toast(`Deleting marker with ID: ${id}`)
+
+      // Force update the markers array
+      setMarkers((prevMarkers) => {
+        const newMarkers = prevMarkers.filter((marker) => marker.id !== id)
+        toast(`Markers after deletion: ${newMarkers.length}`)
+
+        // If you're storing markers in localStorage, update that too
+        localStorage.setItem('mapMarkers', JSON.stringify(newMarkers))
+
+        return newMarkers
+      })
+
+      // Clear selected marker if needed
+      if (selectedMarkerId && selectedMarkerId.toString() === id.toString()) {
+        setSelectedMarkerId(null)
+      }
+
+      // Show confirmation
+      toast.success('Marker deleted')
+    },
+    [selectedMarkerId]
+  )
+
+  // Set up map events
+  useMapEvents({
+    click: (e) => {
+      if (isAddingMarkers) {
+        // Ensure we're not clicking on a control element
+        const target = e.originalEvent.target as HTMLElement
+        if (
+          target.closest('.leaflet-control') ||
+          target.closest('.leaflet-popup')
+        ) {
+          return
+        }
+
+        // Add marker at click location
+        handleAddMarker(e.latlng.lat, e.latlng.lng)
+      }
+    },
+  })
+
+  // Update cursor based on marker mode
   useEffect(() => {
     if (!map) return
 
-    const handleMapClick = (e: L.LeafletMouseEvent) => {
-      if (isAddingMarkers) {
-        const newMarkerId = handleAddMarker({
-          lat: e.latlng.lat,
-          lng: e.latlng.lng,
-        })
-        setSelectedMarkerId(newMarkerId)
-        toast.success(
-          `Marker added at (${e.latlng.lat.toFixed(5)}, ${e.latlng.lng.toFixed(
-            5
-          )})`
-        )
-      }
-    }
-
     if (isAddingMarkers) {
-      map.on('click', handleMapClick)
       map.getContainer().style.cursor = 'crosshair'
-      toast('Click on the map to add markers')
     } else {
-      map.off('click', handleMapClick)
       map.getContainer().style.cursor = ''
     }
-
-    return () => {
-      map.off('click', handleMapClick)
-      map.getContainer().style.cursor = ''
-    }
-  }, [isAddingMarkers, handleAddMarker, map])
+  }, [isAddingMarkers, map])
 
   return (
     <>
       {markers.map((marker) => (
         <DraggableMarker
           key={marker.id}
-          id={marker.id}
+          id={marker.id.toString()}
           position={[marker.lat, marker.lng]}
           label={marker.label}
           index={marker.index}
           isSelected={selectedMarkerId === marker.id}
+          isNew={marker.id === newMarkerId} // Pass isNew prop here
+          onClick={() => handleMarkerClick(marker.id)}
           onDragEnd={(pos) =>
             handleMarkerDragEnd(marker.id, { lat: pos[0], lng: pos[1] })
           }
-          onClick={() => handleMarkerClick(marker.id)}
-          onEdit={(newLabel) => handleEditMarkerLabel(marker.id, newLabel)}
+          onEdit={(newLabel) =>
+            handleEditMarkerLabel(marker.id.toString(), newLabel)
+          }
           onDelete={() => handleDeleteMarker(marker.id)}
+          onColorChange={(newColor) => handleColorChange(marker.id, newColor)}
+          onEditStateChange={(isEditing) => setIsAnyMarkerEditing(isEditing)}
+          iconColor={marker.iconColor}
+          iconName="locationDot"
         />
       ))}
+      <MapClickHandler
+        isAddingMarkers={isAddingMarkers}
+        isEditingMarker={isAnyMarkerEditing}
+        onAddMarker={handleAddMarker}
+      />
     </>
   )
 }
