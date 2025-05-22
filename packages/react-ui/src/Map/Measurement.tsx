@@ -1,4 +1,10 @@
-import { useState, useMemo, useEffect, useRef, SetStateAction } from 'react'
+import React, {
+  useState,
+  useMemo,
+  useEffect,
+  useRef,
+  SetStateAction,
+} from 'react'
 import {
   Circle,
   useMapEvents,
@@ -7,6 +13,7 @@ import {
   useMap,
   Polyline,
 } from 'react-leaflet'
+import { useState as useHoverState } from 'react'
 import L, { LatLng, LatLngExpression, latLng } from 'leaflet'
 import { point, distance, polygon, area } from '@turf/turf'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
@@ -140,6 +147,31 @@ export const Measurement: React.FC<MeasurementProps> = ({
   const [counter, setCounter] = useState(1)
   let countArray: string | SetStateAction<number> = 0
 
+  // Add hover state
+  const [hoveredFeature, setHoveredFeature] = useHoverState<string | null>(null)
+  // Styles for normal and hover states
+  const normalStyle = { color: color, weight: 3, fillOpacity: 0.2 }
+  const hoverStyle = { color: color, weight: 5, fillOpacity: 0.4 }
+  const pointNormalStyle = {
+    radius: 25,
+    color: color,
+    fillColor: color,
+    fillOpacity: 1,
+  }
+  const pointHoverStyle = {
+    radius: 35,
+    color: color,
+    fillColor: color,
+    fillOpacity: 1,
+  }
+  // Handler functions for hover events
+  const handleMouseOver = (featureId: string) => () => {
+    setHoveredFeature(featureId)
+  }
+  const handleMouseOut = () => {
+    setHoveredFeature(null)
+  }
+
   // Add an effect to handle popup opening
   useEffect(() => {
     // If popup should be shown and we're not in edit mode
@@ -257,114 +289,174 @@ export const Measurement: React.FC<MeasurementProps> = ({
 
   // Point Component
   const PointComponent = () => (
-    <Circle center={measurements[0]} radius={25} color={color}>
-      <Popup>
-        <ul className="flex flex-col">
-          <>
-            <h6>
-              <span
-                className="width=100% text-align=center font-bold text-blue-800"
-                justify-content="center"
-              >
-                Point Location
-              </span>
-            </h6>
+    <Circle
+      center={measurements[0]}
+      radius={25}
+      pathOptions={
+        hoveredFeature === 'point' ? pointHoverStyle : pointNormalStyle
+      }
+      eventHandlers={{
+        mouseover: handleMouseOver('point'),
+        mouseout: handleMouseOut,
+        click: () => setIsPopupOpen(true),
+      }}
+    >
+      {hoveredFeature === 'point' && !isPopupOpen && (
+        <Popup className="measurement-tooltip" autoPan offset={[0, -40]}>
+          <div>
+            <strong>Point Location</strong>
             <br />
-            <hr />
-            <br />
-            <li>
-              Point Coordinate:
+            {mapC}
+          </div>
+        </Popup>
+      )}
+      {isPopupOpen && (
+        <Popup>
+          <ul className="flex flex-col">
+            <>
+              <h6>
+                <span
+                  className="width=100% text-align=center font-bold text-blue-800"
+                  justify-content="center"
+                >
+                  Point Location
+                </span>
+              </h6>
               <br />
-              <span style={measStyle}>
-                {dmsC}
+              <hr />
+              <br />
+              <li>
+                Point Coordinate:
                 <br />
-                {mapC}
+                <span style={measStyle}>
+                  {dmsC}
+                  <br />
+                  {mapC}
+                  <br />
+                </span>
                 <br />
-              </span>
-              <br />
-              <hr></hr>
-              <br />
-            </li>
-          </>
-          <ClickOptions />
-        </ul>
-      </Popup>
+                <hr></hr>
+                <br />
+              </li>
+            </>
+            <ClickOptions />
+          </ul>
+        </Popup>
+      )}
     </Circle>
   )
   // Polyline Component
   const PolylineComponent = () => (
-    <Polyline positions={measurements} color={color}>
-      <Popup>
-        <ul className="flex flex-col">
-          <>
-            <h6>
-              <span
-                className="width=100% text-align=center font-bold text-blue-800"
-                justify-content="center"
-              >
-                Linear Measurement
-              </span>
-            </h6>
+    <Polyline
+      positions={measurements}
+      pathOptions={hoveredFeature === 'line' ? hoverStyle : normalStyle}
+      eventHandlers={{
+        mouseover: handleMouseOver('line'),
+        mouseout: handleMouseOut,
+        click: () => setIsPopupOpen(true),
+      }}
+    >
+      {hoveredFeature === 'line' && !isPopupOpen && (
+        <Popup className="measurement-tooltip" autoPan>
+          <div>
+            <strong>Distance</strong>
             <br />
-            <hr />
-            <br />
-            <li>
-              Path Distance:
+            {m.toString().replace(regex, ',')} m
+          </div>
+        </Popup>
+      )}
+      {isPopupOpen && (
+        <Popup>
+          <ul className="flex flex-col">
+            <>
+              <h6>
+                <span
+                  className="width=100% text-align=center font-bold text-blue-800"
+                  justify-content="center"
+                >
+                  Linear Measurement
+                </span>
+              </h6>
               <br />
-              <span style={measStyle}>
-                {m.toString().replace(regex, ',')} Meters ({km} Kilometers)
-              </span>
+              <hr />
               <br />
-              <hr></hr>
-              <br />
-            </li>
-          </>
-          <ClickOptions />
-        </ul>
-      </Popup>
+              <li>
+                Path Distance:
+                <br />
+                <span style={measStyle}>
+                  {m.toString().replace(regex, ',')} Meters ({km} Kilometers)
+                </span>
+                <br />
+                <hr></hr>
+                <br />
+              </li>
+            </>
+            <ClickOptions />
+          </ul>
+        </Popup>
+      )}
     </Polyline>
   )
   // Polygon Component
   const PolygonComponent = () => (
-    <Polygon ref={polygonRef} positions={measurements} color={color}>
-      <Popup>
-        <ul className="flex flex-col">
-          <>
-            <h6>
-              <span
-                className="width=100% text-align=center font-bold text-blue-800"
-                justify-content="center"
-              >
-                Area Measurement
-              </span>
-            </h6>
+    <Polygon
+      positions={measurements}
+      pathOptions={hoveredFeature === 'area' ? hoverStyle : normalStyle}
+      eventHandlers={{
+        mouseover: handleMouseOver('area'),
+        mouseout: handleMouseOut,
+        click: () => setIsPopupOpen(true),
+      }}
+    >
+      {hoveredFeature === 'area' && !isPopupOpen && (
+        <Popup className="measurement-tooltip" autoPan>
+          <div>
+            <strong>Area</strong>
             <br />
-            <hr />
-            <br />
-            <li>
-              <span className="text-gray-600">Perimeter Distance:</span>
+            {m2.toString().replace(regex, ',')} m²
+          </div>
+        </Popup>
+      )}
+      {isPopupOpen && (
+        <Popup>
+          <ul className="flex flex-col">
+            <>
+              <h6>
+                <span
+                  className="width=100% text-align=center font-bold text-blue-800"
+                  justify-content="center"
+                >
+                  Area Measurement
+                </span>
+              </h6>
               <br />
-              <span style={measStyle}>
-                {m.toString().replace(regex, ',')} Meters ({km} Kilometers)
-              </span>
+              <hr />
               <br />
-              <hr></hr>
-              <br />
-            </li>
-            <li>
-              <span className="text-gray-600">Area:</span>
-              <br />
-              <span style={measStyle}>
-                {m2.toString().replace(regex, ',')} Sq. Meters{' '}
-              </span>
-              <br />
-              <hr></hr>
-              <br />
-            </li>
-          </>
-          <ClickOptions />
-        </ul>
-      </Popup>
+              <li>
+                <span className="text-gray-600">Perimeter Distance:</span>
+                <br />
+                <span style={measStyle}>
+                  {m.toString().replace(regex, ',')} Meters ({km} Kilometers)
+                </span>
+                <br />
+                <hr></hr>
+                <br />
+              </li>
+              <li>
+                <span className="text-gray-600">Area:</span>
+                <br />
+                <span style={measStyle}>
+                  {m2.toString().replace(regex, ',')} Sq. Meters{' '}
+                </span>
+                <br />
+                <hr></hr>
+                <br />
+              </li>
+            </>
+            <ClickOptions />
+          </ul>
+        </Popup>
+      )}
     </Polygon>
   )
 
@@ -396,24 +488,23 @@ export const Measurement: React.FC<MeasurementProps> = ({
   // Modify your component rendering to use the isPopupOpen state directly
   return (
     <>
-      {measurements.map((m) => (
-        <>
-          <Circle
-            center={{
-              lat: m.lat,
-              lng: m.lng,
-            }}
-            fillColor={color}
-            fillOpacity={1}
-            color={color}
-            radius={25}
-            eventHandlers={{
-              click: () => {
-                setIsPopupOpen(true)
-              },
-            }}
-          />
-        </>
+      {measurements.map((m, index) => (
+        <Circle
+          key={`measurement-point-${index}-${m.lat}-${m.lng}`}
+          center={{
+            lat: m.lat,
+            lng: m.lng,
+          }}
+          fillColor={color}
+          fillOpacity={1}
+          color={color}
+          radius={25}
+          eventHandlers={{
+            click: () => {
+              setIsPopupOpen(true)
+            },
+          }}
+        />
       ))}
 
       {isPoint.current ? (
