@@ -479,7 +479,7 @@ const MissionModalBody: React.FC<MissionModalViewProps> = ({
               </span>
               {previewSbdCount != null && previewSbdCount >= 2 && (
                 <span className="shrink-0 text-sm text-stone-500">
-                  This will be sent as {previewSbdCount} SBD chunks
+                  (This will be sent as {previewSbdCount} SBD chunks)
                 </span>
               )}
             </p>
