@@ -460,7 +460,9 @@ test('shows quiet SBD chunk note beside review intro when count >= 2', () => {
   expect(
     screen.getByText(/The following command will be sent to/i)
   ).toBeInTheDocument()
-  expect(screen.getByText('3 SBD chunks')).toBeInTheDocument()
+  expect(
+    screen.getByText('This will be sent as 3 SBD chunks')
+  ).toBeInTheDocument()
 })
 
 test('hides SBD chunk note for single-part previews', () => {
