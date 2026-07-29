@@ -261,7 +261,7 @@ test('shows Operator field for regular operator-sent missions', () => {
 
 // ── SBD chunk parity (#797) ───────────────────────────────────────────────────
 
-test('shows SBD chunk progress to the right of Iridium Msg IDs', () => {
+test('shows SBD chunk progress in the right grid column beside Iridium Msg IDs', () => {
   ;(useGlobalModalId as jest.Mock).mockReturnValue(
     makeModalId({
       ...baseEvent,
