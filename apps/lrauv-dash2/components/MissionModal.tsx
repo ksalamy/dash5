@@ -5,6 +5,7 @@ import {
   ParameterProps,
   useManagedWaypoints,
   WaypointTableProps,
+  MISSION_MODAL_SEND_COMMAND_STEP,
 } from '@mbari/react-ui'
 import { capitalize, makeOrdinal } from '@mbari/utils'
 import {
@@ -16,6 +17,8 @@ import {
   useTethysApiContext,
   getPreview,
   countPreviewSbdChunks,
+  getVia,
+  timeoutRegEx,
 } from '@mbari/api-client'
 import { useMissionData } from '../lib/useMissionData'
 import { useRouter } from 'next/router'
@@ -26,6 +29,7 @@ import useGlobalModalId from '../lib/useGlobalModalId'
 import { useParameterOverrides } from '../lib/useParameterOverrides'
 import { useWaypointCalculations } from '../lib/useWaypointCalculations'
 import { useInsertTempMission } from '../lib/useInsertTempMission'
+import { previewTextFromEventData } from '../lib/missionSendAgain'
 
 export interface MissionModalProps {
   onClose: () => void
@@ -266,6 +270,43 @@ const MissionModal: React.FC<MissionModalProps> = ({
 
   const [previewText, setPreviewText] = useState<string | undefined>()
   const [previewSbdCount, setPreviewSbdCount] = useState<number | undefined>()
+  const sendAgain = Boolean(globalModalId?.meta?.sendAgain)
+  // Defer mounting the wizard until Send again has a selected mission + preview,
+  // so currentStepIndex=Send Command is applied on first paint.
+  const [sendAgainReady, setSendAgainReady] = useState(!sendAgain)
+
+  useEffect(() => {
+    if (!sendAgain) {
+      setSendAgainReady(true)
+      return
+    }
+    if (recentRunsLoading || frequentRunsLoading || isMissionListLoading) return
+    if (!selectedMission || !hasAutoSelectedRef.current) return
+
+    setPreviewText(previewTextFromEventData(globalModalId?.meta?.eventData))
+    setSendAgainReady(true)
+  }, [
+    sendAgain,
+    selectedMission,
+    recentRunsLoading,
+    frequentRunsLoading,
+    isMissionListLoading,
+    globalModalId?.meta?.eventData,
+  ])
+
+  const initialScheduleState = useMemo(() => {
+    if (!sendAgain) return undefined
+    const note = globalModalId?.meta?.eventNote ?? undefined
+    const via = getVia(note)
+    const timeoutMin = note?.match(timeoutRegEx)?.[1]
+    return {
+      scheduleMethod: 'ASAP' as const,
+      alternateAddress: null,
+      commType: via ?? ('cellsat' as const),
+      timeout: timeoutMin ? parseInt(timeoutMin, 10) : 5,
+      confirmedVehicle: capitalize(vehicleName),
+    }
+  }, [sendAgain, globalModalId?.meta?.eventNote, vehicleName])
 
   const handleSchedule: MissionModalViewProps['onSchedule'] = async ({
     confirmedVehicle,
@@ -348,11 +389,15 @@ const MissionModal: React.FC<MissionModalProps> = ({
     )
   }
 
+  if (!sendAgainReady) {
+    return null
+  }
+
   return (
     <MissionModalView
-      style={{ maxHeight: '80vh' }}
+      style={{ height: 'calc(100vh - 6rem)' }}
       alternativeAddresses={alternativeAddresses}
-      currentStepIndex={0}
+      currentStepIndex={sendAgain ? MISSION_MODAL_SEND_COMMAND_STEP : 0}
       vehicleName={capitalize(vehicleName)}
       bottomDepth="n/a"
       totalDistance={estDistance ? `${estDistance.toPrecision(4)}km` : 'n/a'}
@@ -388,6 +433,7 @@ const MissionModal: React.FC<MissionModalProps> = ({
       defaultSearchText={globalModalId?.meta?.mission ?? ''}
       showAllVehicleMissions={showAllVehicleMissions}
       onShowAllVehicleMissions={setShowAllVehicleMissions}
+      initialScheduleState={initialScheduleState}
       defaultOverrides={
         selectedMissionCategory === 'Recent Runs' ||
         selectedMissionCategory === 'Frequent Runs'
